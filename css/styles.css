@@ -2845,6 +2845,25 @@ body.light-theme .destination-badge {
     border-radius: 12px;
 }
 
+.about-meta-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+body.light-theme .about-meta-badge {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: var(--text-muted);
+}
+
 .modal-about-body {
     display: flex;
     flex-direction: column;

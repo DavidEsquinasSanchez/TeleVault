@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnRefresh = document.getElementById('btnRefresh');
     const connDot = document.getElementById('connDot');
     const connText = document.getElementById('connText');
+    const brandVersionPill = document.getElementById('brandVersionPill');
+    const aboutVersionBadge = document.getElementById('aboutVersionBadge');
+    const aboutMetaBadge = document.getElementById('aboutMetaBadge');
 
     const uploadForm = document.getElementById('uploadForm');
     const categoriaSelect = document.getElementById('categoria');
@@ -516,6 +519,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function checkHealth() {
         try {
             const h = await window.TelegramAPI.health();
+            if (h.version) {
+                if (brandVersionPill) {
+                    brandVersionPill.textContent = h.version;
+                    const branchInfo = h.branch ? ` · Rama: ${h.branch}` : '';
+                    const commitInfo = h.commit ? ` (${h.commit})` : '';
+                    brandVersionPill.title = `TeleVault ${h.version}${branchInfo}${commitInfo}`;
+                }
+                if (aboutVersionBadge) {
+                    aboutVersionBadge.textContent = h.version;
+                }
+                if (aboutMetaBadge && (h.branch || h.commit)) {
+                    aboutMetaBadge.textContent = `${h.branch || 'main'}${h.commit ? ' @ ' + h.commit : ''}`;
+                    aboutMetaBadge.title = `Rama Git: ${h.branch || 'main'}${h.commit ? ' | Commit: ' + h.commit : ''}`;
+                    aboutMetaBadge.classList.remove('hidden');
+                }
+            }
+
             if (h.bot) {
                 if (headerBotUsername) headerBotUsername.textContent = `@${h.bot}`;
                 if (modalBotName) modalBotName.textContent = `@${h.bot}`;

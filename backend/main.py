@@ -1332,6 +1332,77 @@ def extract_binary_part(source_path: str, output_path: str, start_byte: int, len
 
 
 # ---------------------------------------------------------------------------
+# GESTIÓN DINÁMICA DE VERSIÓN Y RAMA (Git / VERSION)
+# ---------------------------------------------------------------------------
+_last_version_check = 0.0
+_cached_version_info = {}
+
+def get_app_version_info() -> dict:
+    """Detecta dinámicamente la versión, rama y commit actuales (Git o archivo VERSION)."""
+    global _last_version_check, _cached_version_info
+    now = time.time()
+    if _cached_version_info and (now - _last_version_check < 5.0):
+        return _cached_version_info
+
+    version = "v3.2.0"
+    branch = ""
+    commit = ""
+
+    # 1. Archivo VERSION manual en la raíz
+    version_file = FRONTEND_DIR / "VERSION"
+    if version_file.is_file():
+        try:
+            content = version_file.read_text(encoding="utf-8").strip()
+            if content:
+                version = content if content.startswith("v") else f"v{content}"
+        except Exception:
+            pass
+
+    # 2. Consultar Git si está disponible
+    try:
+        r_b = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=str(FRONTEND_DIR), capture_output=True, text=True, timeout=1.5
+        )
+        if r_b.returncode == 0:
+            b = r_b.stdout.strip()
+            if b and b != "HEAD":
+                branch = b
+
+        r_c = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(FRONTEND_DIR), capture_output=True, text=True, timeout=1.5
+        )
+        if r_c.returncode == 0:
+            commit = r_c.stdout.strip()
+
+        r_t = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=str(FRONTEND_DIR), capture_output=True, text=True, timeout=1.5
+        )
+        if r_t.returncode == 0 and r_t.stdout.strip():
+            version = r_t.stdout.strip()
+
+        # Si la rama activa contiene un patrón de versión explícito (ej: feature/v3.3.0 o release/3.3.0),
+        # priorizar la versión indicada en la propia rama activa de desarrollo
+        if branch:
+            m = re.search(r'(v?\d+\.\d+(?:\.\d+)?)', branch)
+            if m:
+                v_branch = m.group(1)
+                version = v_branch if v_branch.startswith("v") else f"v{v_branch}"
+    except Exception as e:
+        log.debug("No se pudo leer versión de git: %s", e)
+
+    _cached_version_info = {
+        "version": version,
+        "branch": branch or "main",
+        "commit": commit,
+    }
+    _last_version_check = now
+    return _cached_version_info
+
+
+# ---------------------------------------------------------------------------
 # ENDPOINTS
 # ---------------------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
@@ -1341,7 +1412,23 @@ async def index():
         return HTMLResponse("index.html no encontrado", status_code=404)
     html = page.read_text(encoding="utf-8")
     meta = f'    <meta name="nigro-token" content="{API_TOKEN}">\n</head>'
-    return HTMLResponse(html.replace("</head>", meta, 1))
+    html = html.replace("</head>", meta, 1)
+
+    vinfo = get_app_version_info()
+    ver = vinfo.get("version", "v3.2.0")
+    html = re.sub(
+        r'<span([^>]*class="[^"]*brand-version-pill[^"]*"[^>]*)>.*?</span>',
+        rf'<span\1>{ver}</span>',
+        html,
+        count=1
+    )
+    html = re.sub(
+        r'<span([^>]*class="[^"]*about-version-badge[^"]*"[^>]*)>.*?</span>',
+        rf'<span\1>{ver}</span>',
+        html,
+        count=1
+    )
+    return HTMLResponse(html)
 
 
 @app.get("/favicon.ico")
@@ -1352,6 +1439,7 @@ async def favicon():
 @app.get("/api/health")
 async def health():
     is_configured = bool(client and client.is_connected() and bot_username)
+    vinfo = get_app_version_info()
     return {
         "ok": is_configured,
         "configured": is_configured,
@@ -1360,7 +1448,16 @@ async def health():
         "scanning": bool(refresh_task and not refresh_task.done()),
         "uploads": len(active_uploads),
         "uptime": int(time.time() - started_at),
+        "version": vinfo.get("version", "v3.2.0"),
+        "branch": vinfo.get("branch", "main"),
+        "commit": vinfo.get("commit", ""),
     }
+
+
+@app.get("/api/version")
+async def get_version():
+    """Devuelve la información dinámica de versión, rama y commit."""
+    return get_app_version_info()
 
 
 @app.get("/api/config/bot")

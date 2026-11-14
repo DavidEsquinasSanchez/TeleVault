@@ -84,6 +84,7 @@ Permite a cualquier usuario transformar Telegram en su propia nube personal orga
 * 🌓 **Diseño Moderno y Responsivo:**
   * Modo oscuro y claro con paneles colapsables y redimensionables.
   * Consola de **Log de Actividad** en vivo con filtros de eventos (Info, Éxito, Advertencia, Error).
+  * 🏷️ **Detección Dinámica de Versión y Rama:** La versión mostrada en el encabezado y en el modal "Acerca de" se resuelve dinámicamente desde Git (tags y ramas activas) o mediante el archivo raíz `VERSION`, garantizando que siempre refleje con precisión la versión en desarrollo o producción sin desajustes manuales.
 
 ---
 
@@ -183,7 +184,7 @@ TeleVault/
 │   ├── i18n.js              # Sistema de internacionalización bilingüe (Español / Inglés)
 │   ├── app.js               # Lógica del frontend, atajos de teclado, subidas y descargas
 │   └── telegram.js          # Capa de comunicación HTTP y SSE con la API local
-├── index.html               # Interfaz gráfica principal de TeleVault v3.0.0
+├── index.html               # Interfaz gráfica principal de TeleVault
 ├── iniciar.bat              # Script de inicio rápido de un solo clic para Windows
 └── README.md                # Documentación del proyecto
 ```

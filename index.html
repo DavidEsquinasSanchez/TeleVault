@@ -19,6 +19,10 @@
                     <h1 class="brand-title">TeleVault</h1>
                     <span id="brandVersionPill" class="brand-version-pill">v3.2.0</span>
                 </div>
+                <button type="button" id="btnUpdateNotification" class="btn-update-notification hidden" title="Nueva versión disponible" data-i18n-title="header.update_available">
+                    <span class="update-pulse-dot"></span>
+                    <span id="updateNotificationText" class="update-notification-text">Nueva versión</span>
+                </button>
                 <div class="header-divider"></div>
                 <div class="header-action-group">
                     <button type="button" id="btnRefresh" class="btn-header-icon" title="Recargar página" data-i18n-title="header.refresh" aria-label="Recargar página" data-i18n-aria-label="header.refresh">
@@ -900,6 +904,19 @@
                     </p>
                 </div>
 
+                <div class="about-update-card">
+                    <div class="about-update-info">
+                        <span class="about-update-icon">🔄</span>
+                        <div class="about-update-details">
+                            <span class="about-update-title" id="aboutUpdateStatusText" data-i18n="modals.updater.up_to_date">TeleVault está actualizado</span>
+                            <span class="about-update-sub" id="aboutUpdateSubText">Comprobación automática activada</span>
+                        </div>
+                    </div>
+                    <button type="button" id="btnAboutCheckUpdate" class="btn-about-check-update" data-i18n="modals.updater.btn_check_update">
+                        Buscar actualizaciones
+                    </button>
+                </div>
+
                 <div class="about-action-section">
                     <a href="https://github.com/DavidEsquinasSanchez/TeleVault" target="_blank" rel="noopener noreferrer" class="btn-about-repo" id="btnOpenGitHubRepo" title="Abrir repositorio oficial en GitHub">
                         <span class="about-repo-icon">🐙</span>
@@ -921,6 +938,73 @@
                 <button type="button" id="btnConfirmCloseAboutModal" class="btn-primary-action" data-i18n="modals.close">
                     Cerrar
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Actualizador de TeleVault (1 Clic) -->
+    <div id="updateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="updateModalTitle">
+        <div class="modal-content modal-update-content">
+            <div class="modal-channels-header">
+                <div class="modal-update-header-title">
+                    <span class="update-header-icon">🚀</span>
+                    <h3 id="updateModalTitle" data-i18n="modals.updater.modal_title">Actualizar TeleVault</h3>
+                </div>
+                <button type="button" id="btnCloseUpdateModal" class="btn-modal-close" title="Cerrar" data-i18n-title="modals.close" aria-label="Cerrar ventana" data-i18n-aria-label="modals.close">✕</button>
+            </div>
+
+            <!-- Vista 1: Confirmación y notas de versión -->
+            <div id="updateConfirmView" class="update-modal-view">
+                <div class="update-version-summary">
+                    <div class="update-version-card current">
+                        <span class="update-card-label" data-i18n="modals.updater.current_ver_label">Versión actual instalada:</span>
+                        <span id="updateCurrentVer" class="update-ver-tag">v3.2.0</span>
+                    </div>
+                    <div class="update-version-arrow">➔</div>
+                    <div class="update-version-card new">
+                        <span class="update-card-label" data-i18n="modals.updater.latest_ver_label">Nueva versión disponible:</span>
+                        <span id="updateLatestVer" class="update-ver-tag highlight">v3.2.1</span>
+                    </div>
+                </div>
+
+                <div class="update-safety-badge">
+                    <span class="safety-badge-icon">🛡️</span>
+                    <div class="safety-badge-body">
+                        <strong data-i18n="modals.updater.safety_title">100% Seguro y Protegido</strong>
+                        <p data-i18n="modals.updater.safety_desc">Tus canales, configuración (.env, config.json) y sesiones de Telegram no se tocan y se conservarán intactos.</p>
+                    </div>
+                </div>
+
+                <div class="update-notes-container">
+                    <h4 class="update-notes-title" data-i18n="modals.updater.release_notes_label">Novedades de la versión:</h4>
+                    <div id="updateReleaseNotes" class="update-notes-content markdown-body">
+                        <!-- Se insertan dinámicamente las notas de la release -->
+                    </div>
+                </div>
+
+                <div class="update-modal-actions">
+                    <button type="button" id="btnCancelUpdateModal" class="btn-secondary-action" data-i18n="modals.updater.btn_cancel">
+                        Ahora no
+                    </button>
+                    <button type="button" id="btnConfirmInstallUpdate" class="btn-primary-action btn-install-action" data-i18n="modals.updater.btn_install">
+                        Actualizar ahora (1 Clic)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Vista 2: Progreso de instalación -->
+            <div id="updateProgressView" class="update-modal-view hidden">
+                <div class="update-progress-container">
+                    <div class="update-spinner-box">
+                        <div class="update-spinner"></div>
+                    </div>
+                    <h4 id="updateProgressTitle" class="update-progress-title" data-i18n="modals.updater.installing_title">Actualizando TeleVault...</h4>
+                    <p id="updateProgressStatus" class="update-progress-status">Descargando e instalando actualización...</p>
+                    <div class="update-progress-bar-wrapper">
+                        <div id="updateProgressBar" class="update-progress-bar" style="width: 20%;"></div>
+                    </div>
+                    <p class="update-progress-warning" data-i18n="modals.updater.installing_desc">Por favor, no cierres esta ventana. La aplicación se recargará automáticamente al finalizar.</p>
+                </div>
             </div>
         </div>
     </div>

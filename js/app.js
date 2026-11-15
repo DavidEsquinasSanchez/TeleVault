@@ -588,6 +588,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         checkHealth();
         setInterval(checkHealth, HEALTH_INTERVAL_MS);
 
+        // Comprobar actualizaciones oficiales en segundo plano
+        setTimeout(() => {
+            checkAppUpdates(false, true);
+        }, 1500);
+
         // 0) Comprobar si hay descarga en curso o cola previa
         try {
             const prog = await window.TelegramAPI.getDownloadProgress();
@@ -3788,9 +3793,294 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    // -------------------------------------------------- Sistema de Actualizaciones de 1 Clic
+    const btnUpdateNotification = document.getElementById('btnUpdateNotification');
+    const updateNotificationText = document.getElementById('updateNotificationText');
+    const aboutUpdateStatusText = document.getElementById('aboutUpdateStatusText');
+    const aboutUpdateSubText = document.getElementById('aboutUpdateSubText');
+    const btnAboutCheckUpdate = document.getElementById('btnAboutCheckUpdate');
+
+    const updateModal = document.getElementById('updateModal');
+    const btnCloseUpdateModal = document.getElementById('btnCloseUpdateModal');
+    const btnCancelUpdateModal = document.getElementById('btnCancelUpdateModal');
+    const updateConfirmView = document.getElementById('updateConfirmView');
+    const updateProgressView = document.getElementById('updateProgressView');
+    const updateCurrentVer = document.getElementById('updateCurrentVer');
+    const updateLatestVer = document.getElementById('updateLatestVer');
+    const updateReleaseNotes = document.getElementById('updateReleaseNotes');
+    const btnConfirmInstallUpdate = document.getElementById('btnConfirmInstallUpdate');
+    const updateProgressTitle = document.getElementById('updateProgressTitle');
+    const updateProgressStatus = document.getElementById('updateProgressStatus');
+    const updateProgressBar = document.getElementById('updateProgressBar');
+
+    let cachedUpdateInfo = null;
+    let isCheckingUpdate = false;
+    let isInstallingUpdate = false;
+
+    function formatMarkdownNotes(raw) {
+        if (!raw) return '<p style="color:var(--text-muted); font-style:italic;">No se proporcionaron notas detalladas para esta versión.</p>';
+        let text = String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        text = text.replace(/^### (.*$)/gim, '<h5 style="margin: 8px 0 4px; font-weight:700; color:var(--text-main);">$1</h5>');
+        text = text.replace(/^## (.*$)/gim, '<h4 style="margin: 12px 0 6px; font-weight:700; color:var(--accent);">$1</h4>');
+        text = text.replace(/^# (.*$)/gim, '<h3 style="margin: 14px 0 8px; font-weight:800; color:var(--accent);">$1</h3>');
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        text = text.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08); padding:1px 5px; border-radius:4px; font-size:0.88em;">$1</code>');
+        text = text.replace(/^\s*[-*]\s+(.*$)/gim, '<li style="margin-left: 18px; margin-bottom: 4px;">$1</li>');
+        text = text.replace(/\n\n/g, '<br><br>');
+        return text;
+    }
+
+    function updateUiForUpdateInfo(info) {
+        if (!info) return;
+        const currentVer = info.current_version || (brandVersionPill ? brandVersionPill.textContent : 'v3.2.0');
+        const latestVer = info.latest_version || currentVer;
+
+        if (info.update_available) {
+            // Mostrar botón pill en el header
+            if (btnUpdateNotification) {
+                btnUpdateNotification.classList.remove('hidden');
+                const badgeText = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.badge_update_available', `Nueva versión ${latestVer}`, { ver: latestVer }) : `Nueva versión ${latestVer}`;
+                if (updateNotificationText) updateNotificationText.textContent = badgeText;
+            }
+            // En modal Acerca de
+            if (aboutUpdateStatusText) {
+                const foundText = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.update_found', `¡Nueva versión disponible: ${latestVer}!`, { ver: latestVer }) : `¡Nueva versión disponible: ${latestVer}!`;
+                aboutUpdateStatusText.textContent = foundText;
+                aboutUpdateStatusText.style.color = '#10b981';
+            }
+            if (aboutUpdateSubText) {
+                aboutUpdateSubText.textContent = info.release_name ? `${info.release_name}` : `Versión ${latestVer} disponible en GitHub`;
+            }
+            if (btnAboutCheckUpdate) {
+                btnAboutCheckUpdate.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.btn_install', 'Actualizar ahora (1 Clic)') : 'Actualizar ahora (1 Clic)';
+                btnAboutCheckUpdate.classList.add('btn-install-action');
+            }
+        } else {
+            // Ocultar botón pill en header
+            if (btnUpdateNotification) {
+                btnUpdateNotification.classList.add('hidden');
+            }
+            // En modal Acerca de
+            if (aboutUpdateStatusText) {
+                const upToDateText = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.up_to_date', `TeleVault está actualizado (${currentVer})`, { ver: currentVer }) : `TeleVault está actualizado (${currentVer})`;
+                aboutUpdateStatusText.textContent = upToDateText;
+                aboutUpdateStatusText.style.color = '';
+            }
+            if (aboutUpdateSubText) {
+                aboutUpdateSubText.textContent = 'Tienes instalada la última versión disponible.';
+            }
+            if (btnAboutCheckUpdate) {
+                btnAboutCheckUpdate.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.btn_check_update', 'Buscar actualizaciones') : 'Buscar actualizaciones';
+                btnAboutCheckUpdate.classList.remove('btn-install-action');
+            }
+        }
+    }
+
+    async function checkAppUpdates(force = false, silent = true) {
+        if (isCheckingUpdate || isInstallingUpdate) return;
+        isCheckingUpdate = true;
+
+        if (btnAboutCheckUpdate && !silent) {
+            btnAboutCheckUpdate.disabled = true;
+            btnAboutCheckUpdate.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.btn_checking', 'Comprobando...') : 'Comprobando...';
+        }
+
+        try {
+            const res = await window.TelegramAPI.checkUpdate(force);
+            cachedUpdateInfo = res;
+            updateUiForUpdateInfo(res);
+
+            if (!silent) {
+                if (res.update_available) {
+                    openUpdateModal(res);
+                } else {
+                    addLog(`TeleVault está en su versión más reciente (${res.current_version}).`, 'info');
+                }
+            }
+        } catch (err) {
+            console.warn('[Updater] Error al comprobar actualización:', err);
+            if (!silent) {
+                addLog(`No se pudo comprobar la actualización: ${err.message}`, 'error');
+            }
+        } finally {
+            isCheckingUpdate = false;
+            if (btnAboutCheckUpdate) {
+                btnAboutCheckUpdate.disabled = false;
+                if (!cachedUpdateInfo?.update_available) {
+                    btnAboutCheckUpdate.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.btn_check_update', 'Buscar actualizaciones') : 'Buscar actualizaciones';
+                }
+            }
+        }
+    }
+
+    function openUpdateModal(info) {
+        const updateData = info || cachedUpdateInfo;
+        if (!updateData || !updateModal) return;
+
+        // Si ya está en proceso de instalación, no reiniciar la vista
+        if (!isInstallingUpdate) {
+            if (updateConfirmView) updateConfirmView.classList.remove('hidden');
+            if (updateProgressView) updateProgressView.classList.add('hidden');
+            if (btnCloseUpdateModal) btnCloseUpdateModal.style.display = '';
+
+            const current = updateData.current_version || (brandVersionPill ? brandVersionPill.textContent : 'v3.2.0');
+            const latest = updateData.latest_version || current;
+
+            if (updateCurrentVer) updateCurrentVer.textContent = current;
+            if (updateLatestVer) updateLatestVer.textContent = latest;
+            if (updateReleaseNotes) updateReleaseNotes.innerHTML = formatMarkdownNotes(updateData.release_notes);
+            if (btnConfirmInstallUpdate) btnConfirmInstallUpdate.disabled = false;
+        }
+
+        updateModal.classList.remove('hidden');
+    }
+
+    function closeUpdateModal() {
+        if (isInstallingUpdate) return; // Bloquear cierre mientras se instala
+        if (updateModal) updateModal.classList.add('hidden');
+    }
+
+    async function handleInstallUpdate() {
+        if (isInstallingUpdate) return;
+
+        // Comprobar que no haya transferencias activas
+        const hasUploading = filesToUpload && filesToUpload.some(f => isWorkingStatus(f.status));
+        if (hasUploading) {
+            const busyMsg = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.busy_uploads', 'Hay subidas en curso. Espera a que finalicen antes de actualizar.') : 'Hay subidas en curso. Espera a que finalicen antes de actualizar.';
+            alert(busyMsg);
+            return;
+        }
+
+        if (isDownloading) {
+            const busyMsg = window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.busy_downloads', 'Hay descargas en curso. Espera a que finalicen antes de actualizar.') : 'Hay descargas en curso. Espera a que finalicen antes de actualizar.';
+            alert(busyMsg);
+            return;
+        }
+
+        isInstallingUpdate = true;
+
+        if (updateConfirmView) updateConfirmView.classList.add('hidden');
+        if (updateProgressView) updateProgressView.classList.remove('hidden');
+        if (btnCloseUpdateModal) btnCloseUpdateModal.style.display = 'none';
+
+        if (updateProgressBar) updateProgressBar.style.width = '20%';
+        if (updateProgressStatus) updateProgressStatus.textContent = 'Descargando paquete oficial de actualización desde GitHub...';
+
+        const tag = cachedUpdateInfo?.latest_version || null;
+        const url = cachedUpdateInfo?.download_url || null;
+
+        try {
+            // Simular avance inicial fluido
+            setTimeout(() => {
+                if (isInstallingUpdate && updateProgressBar) updateProgressBar.style.width = '55%';
+                if (isInstallingUpdate && updateProgressStatus) updateProgressStatus.textContent = 'Verificando e instalando archivos actualizados...';
+            }, 800);
+
+            const result = await window.TelegramAPI.installUpdate(tag, url);
+
+            if (updateProgressBar) updateProgressBar.style.width = '100%';
+            if (updateProgressStatus) {
+                updateProgressStatus.textContent = window.TeleVaultI18n
+                    ? window.TeleVaultI18n.t('modals.updater.install_success', '¡Actualización completada con éxito! Reiniciando la aplicación...')
+                    : '¡Actualización completada con éxito! Reiniciando la aplicación...';
+                updateProgressStatus.style.color = '#10b981';
+            }
+
+            addLog(`TeleVault se ha actualizado con éxito a la versión ${result.version || tag}.`, 'success');
+
+            // Countdown para recarga automática
+            let countdown = 3;
+            const timer = setInterval(() => {
+                countdown--;
+                if (updateProgressStatus) {
+                    const reloadText = window.TeleVaultI18n
+                        ? window.TeleVaultI18n.t('modals.updater.reloading_in', `Recargando en ${countdown}s...`, { n: countdown })
+                        : `Recargando en ${countdown}s...`;
+                    updateProgressStatus.textContent = `${result.message || 'Actualizado correctamente.'} ${reloadText}`;
+                }
+                if (countdown <= 0) {
+                    clearInterval(timer);
+                    // Polling de salud hasta que el servidor vuelva a responder
+                    pollServerAndReload();
+                }
+            }, 1000);
+
+        } catch (err) {
+            console.error('[Updater] Error durante la instalación:', err);
+            isInstallingUpdate = false;
+            if (btnCloseUpdateModal) btnCloseUpdateModal.style.display = '';
+            if (updateProgressBar) updateProgressBar.style.width = '0%';
+            if (updateProgressStatus) {
+                updateProgressStatus.textContent = `${window.TeleVaultI18n ? window.TeleVaultI18n.t('modals.updater.install_error', 'Error durante la actualización') : 'Error durante la actualización'}: ${err.message}`;
+                updateProgressStatus.style.color = '#ef4444';
+            }
+            addLog(`Fallo al instalar actualización: ${err.message}`, 'error');
+        }
+    }
+
+    async function pollServerAndReload() {
+        let attempts = 0;
+        const maxAttempts = 30; // 30 segundos
+        const check = async () => {
+            attempts++;
+            try {
+                const res = await fetch('/api/health?t=' + Date.now());
+                if (res.ok) {
+                    window.location.reload(true);
+                    return;
+                }
+            } catch (e) {}
+
+            if (attempts < maxAttempts) {
+                setTimeout(check, 1000);
+            } else {
+                window.location.reload(true);
+            }
+        };
+        setTimeout(check, 1500);
+    }
+
+    if (btnUpdateNotification) {
+        btnUpdateNotification.addEventListener('click', () => {
+            openUpdateModal(cachedUpdateInfo);
+        });
+    }
+
+    if (btnAboutCheckUpdate) {
+        btnAboutCheckUpdate.addEventListener('click', () => {
+            if (cachedUpdateInfo?.update_available) {
+                closeAboutModal();
+                openUpdateModal(cachedUpdateInfo);
+            } else {
+                checkAppUpdates(true, false);
+            }
+        });
+    }
+
+    if (btnCloseUpdateModal) btnCloseUpdateModal.addEventListener('click', closeUpdateModal);
+    if (btnCancelUpdateModal) btnCancelUpdateModal.addEventListener('click', closeUpdateModal);
+    if (btnConfirmInstallUpdate) btnConfirmInstallUpdate.addEventListener('click', handleInstallUpdate);
+
+    if (updateModal) {
+        updateModal.addEventListener('click', (e) => {
+            if (e.target === updateModal) closeUpdateModal();
+        });
+    }
+
+    window.addEventListener('televault:langchange', () => {
+        if (cachedUpdateInfo) {
+            updateUiForUpdateInfo(cachedUpdateInfo);
+        }
+    });
+
     // Tecla Escape para cerrar cualquier modal abierto de forma intuitiva
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
+            if (updateModal && !updateModal.classList.contains('hidden') && !isInstallingUpdate) {
+                closeUpdateModal();
+                return;
+            }
             if (aboutModal && !aboutModal.classList.contains('hidden')) closeAboutModal();
             if (guideModal && !guideModal.classList.contains('hidden')) closeGuideModal();
             if (channelsModal && !channelsModal.classList.contains('hidden')) closeChannelsModal();

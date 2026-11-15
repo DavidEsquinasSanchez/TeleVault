@@ -158,6 +158,31 @@ const TelegramAPI = {
         return await response.json();
     },
 
+    async getVersion() {
+        const response = await apiFetch('/version');
+        if (!response.ok) throw new ApiError(await readError(response), response.status);
+        return await response.json();
+    },
+
+    async checkUpdate(force = false) {
+        const url = force ? '/check_update?force=true' : '/check_update';
+        const response = await apiFetch(url);
+        if (!response.ok) throw new ApiError(await readError(response), response.status);
+        return await response.json();
+    },
+
+    async installUpdate(tag = null, downloadUrl = null) {
+        const formData = new FormData();
+        if (tag) formData.append('tag', tag);
+        if (downloadUrl) formData.append('downloadUrl', downloadUrl);
+        const response = await apiFetch('/install_update', {
+            method: 'POST',
+            body: formData
+        });
+        if (!response.ok) throw new ApiError(await readError(response), response.status);
+        return await response.json();
+    },
+
     async cancelUploads(ids) {
         if (Array.isArray(ids)) {
             ids.forEach(id => {

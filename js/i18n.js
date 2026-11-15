@@ -22,6 +22,7 @@
                 lang: "Cambiar idioma (ES/EN) · Switch language",
                 guide: "Guía de Configuración y Uso",
                 about: "Acerca de TeleVault, repositorio y contacto",
+                update_available: "Nueva actualización disponible",
                 bot_button_title: "Configurar bot de Telegram y ver estado de conexión",
                 bot_config: "Configurar Bot",
                 bot_checking: "Comprobando...",
@@ -232,6 +233,28 @@
                     repo_title: "Repositorio Oficial en GitHub",
                     repo_sub: "Ver código fuente, ramas y novedades del proyecto",
                     contact_note: "Si tienes cualquier duda, sugerencia de mejora, idea o incidencia, puedes contactar libremente por email (nigromante2004@gmail.com) o abrir una propuesta en GitHub."
+                },
+                updater: {
+                    badge_update_available: "Nueva versión {ver}",
+                    btn_check_update: "Buscar actualizaciones",
+                    btn_checking: "Comprobando...",
+                    up_to_date: "TeleVault está actualizado ({ver})",
+                    update_found: "¡Nueva versión disponible: {ver}!",
+                    modal_title: "Actualizar TeleVault",
+                    current_ver_label: "Versión actual instalada:",
+                    latest_ver_label: "Nueva versión disponible:",
+                    release_notes_label: "Novedades de la versión:",
+                    safety_title: "100% Seguro y Protegido",
+                    safety_desc: "Tus canales, configuración (.env, config.json) y sesiones de Telegram no se tocan y se conservarán intactos.",
+                    btn_install: "Actualizar ahora (1 Clic)",
+                    btn_cancel: "Ahora no",
+                    installing_title: "Actualizando TeleVault...",
+                    installing_desc: "Descargando e instalando la actualización oficial desde GitHub. Por favor, no cierres esta ventana.",
+                    install_success: "¡Actualización completada con éxito! Reiniciando la aplicación...",
+                    install_error: "Error durante la actualización",
+                    reloading_in: "Recargando en {n}s...",
+                    busy_uploads: "Hay subidas en curso. Espera a que finalicen antes de actualizar.",
+                    busy_downloads: "Hay descargas en curso. Espera a que finalicen antes de actualizar."
                 }
             }
         },
@@ -251,6 +274,7 @@
                 lang: "Switch language (ES/EN)",
                 guide: "Setup & User Guide",
                 about: "About TeleVault, repository & contact",
+                update_available: "New update available",
                 bot_button_title: "Configure Telegram bot and view connection status",
                 bot_config: "Configure Bot",
                 bot_checking: "Checking...",
@@ -461,6 +485,28 @@
                     repo_title: "Official GitHub Repository",
                     repo_sub: "View source code, branches, and release updates",
                     contact_note: "If you have questions, improvement ideas, or issues, feel free to contact by email (nigromante2004@gmail.com) or open an issue on GitHub."
+                },
+                updater: {
+                    badge_update_available: "New version {ver}",
+                    btn_check_update: "Check for updates",
+                    btn_checking: "Checking...",
+                    up_to_date: "TeleVault is up to date ({ver})",
+                    update_found: "New version available: {ver}!",
+                    modal_title: "Update TeleVault",
+                    current_ver_label: "Current installed version:",
+                    latest_ver_label: "New version available:",
+                    release_notes_label: "Release notes:",
+                    safety_title: "100% Safe & Protected",
+                    safety_desc: "Your channels, configuration (.env, config.json), and Telegram sessions will remain completely intact.",
+                    btn_install: "Update now (1 Click)",
+                    btn_cancel: "Not now",
+                    installing_title: "Updating TeleVault...",
+                    installing_desc: "Downloading and installing official release from GitHub. Please do not close this window.",
+                    install_success: "Update completed successfully! Restarting application...",
+                    install_error: "Error during update",
+                    reloading_in: "Reloading in {n}s...",
+                    busy_uploads: "There are active uploads. Please wait for them to complete before updating.",
+                    busy_downloads: "There are active downloads. Please wait for them to complete before updating."
                 }
             }
         }

@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+set "TELEVAULT_MANAGED_BY_BAT=1"
 title TeleVault - Telegram Uploader
 color 0a
 cd /d "%~dp0"
@@ -83,7 +84,20 @@ echo.
 echo Abre en tu navegador:  http://127.0.0.1:3000
 echo Cierra esta ventana o pulsa Ctrl+C para detener.
 echo.
+
+:run_loop
 "%PY%" backend\main.py
+
+if exist ".restart_televault" (
+    del /f /q ".restart_televault" >nul 2>&1
+    echo.
+    echo ========================================================
+    echo   Reiniciando TeleVault tras actualizacion...
+    echo ========================================================
+    echo.
+    timeout /t 2 >nul
+    goto :run_loop
+)
 
 pause
 exit /b 0

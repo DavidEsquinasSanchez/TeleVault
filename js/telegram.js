@@ -251,10 +251,12 @@ const TelegramAPI = {
         }
     },
 
-    // Limpia las descargas completadas/canceladas de la cola
-    async clearDownloads() {
+    // Limpia las descargas completadas/canceladas o toda la cola
+    async clearDownloads(mode = 'completed') {
         try {
-            const response = await apiFetch('/clear_downloads', { method: 'POST' });
+            const formData = new FormData();
+            formData.append('mode', mode);
+            const response = await apiFetch('/clear_downloads', { method: 'POST', body: formData });
             return response.ok ? await response.json() : { ok: false };
         } catch (e) {
             return { ok: false };

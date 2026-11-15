@@ -431,9 +431,9 @@ def cache_add_topic(chat_id, topic_id, name: str) -> None:
     update_cache_entry(chat_id, lambda e: e.setdefault("topics", {}).__setitem__(str(topic_id), name))
 
 
-def cache_add_video(chat_id, message_id: int, topic_id, name: str) -> None:
+def cache_add_video(chat_id, message_id: int, topic_id, name: str, size: int = 0) -> None:
     update_cache_entry(chat_id, lambda e: e.setdefault("videos", {}).__setitem__(
-        str(message_id), [int(topic_id) if topic_id else 1, name]))
+        str(message_id), [int(topic_id) if topic_id else 1, name, int(size or 0)]))
 
 
 def read_cached(chat_key: str):
@@ -821,6 +821,27 @@ def video_name(msg) -> str:
     return f"Vídeo {msg.id}"
 
 
+def video_size(msg) -> int:
+    try:
+        if getattr(msg, "file", None) and getattr(msg.file, "size", None):
+            return int(msg.file.size)
+    except Exception:
+        pass
+    try:
+        doc = getattr(msg, "document", None)
+        if doc and getattr(doc, "size", None):
+            return int(doc.size)
+    except Exception:
+        pass
+    try:
+        vid = getattr(msg, "video", None)
+        if vid and getattr(vid, "size", None):
+            return int(vid.size)
+    except Exception:
+        pass
+    return 0
+
+
 def raw_topic_of(msg) -> int:
     """ID de tema 'en bruto'; se valida contra los temas reales al construir la respuesta."""
     rt = getattr(msg, "reply_to", None)
@@ -883,7 +904,7 @@ def process_message(m, videos, new_topic_ids) -> bool:
     if isinstance(getattr(m, "action", None), types.MessageActionTopicCreate):
         new_topic_ids.add(m.id)
     if is_video(m):
-        videos[str(m.id)] = [raw_topic_of(m), video_name(m)]
+        videos[str(m.id)] = [raw_topic_of(m), video_name(m), video_size(m)]
     return True
 
 
@@ -1003,19 +1024,38 @@ def natural_sort_key(s: str):
 def assemble_group(identifier, title, forum, topics, videos) -> dict:
     topics_list = []
     direct_videos = []
+    direct_sizes = {}
     if forum:
         by_topic = {}
-        for tid, name in videos.values():
+        topic_sizes = {}
+        for item in videos.values():
+            tid = item[0]
+            name = item[1]
+            size = item[2] if len(item) > 2 else 0
             key = tid if tid in topics else 1
             by_topic.setdefault(key, []).append(name)
+            topic_sizes.setdefault(key, {})[name] = size
         topics_list = [
-            {"id": str(tid), "nombre": tname, "videos": sorted(by_topic.get(tid, []), key=natural_sort_key)}
+            {
+                "id": str(tid),
+                "nombre": tname,
+                "videos": sorted(by_topic.get(tid, []), key=natural_sort_key),
+                "video_sizes": topic_sizes.get(tid, {})
+            }
             for tid, tname in sorted(topics.items(), key=lambda kv: kv[1].lower())
             if str(tid) != "1" and tname.strip().lower() != "general"
         ]
     else:
-        direct_videos = sorted([name for _, name in videos.values()], key=natural_sort_key)
-    return {"id": str(identifier), "nombre": title, "tieneTemas": bool(forum), "temas": topics_list, "videos": direct_videos}
+        direct_videos = sorted([item[1] for item in videos.values()], key=natural_sort_key)
+        direct_sizes = {item[1]: (item[2] if len(item) > 2 else 0) for item in videos.values()}
+    return {
+        "id": str(identifier),
+        "nombre": title,
+        "tieneTemas": bool(forum),
+        "temas": topics_list,
+        "videos": direct_videos,
+        "video_sizes": direct_sizes
+    }
 
 
 async def group_from_cache(identifier):
@@ -1240,7 +1280,7 @@ async def run_upload(key, path, size, name, chat_id, topic_id, file_id=None, ori
         entity = await client.get_entity(chat_id)
         sent = await upload_and_send(key, path, name, entity, topic_id, on_progress, state, original_name=original_name)
         try:
-            cache_add_video(chat_id, sent.id, topic_id, name)   # aparece en la barra lateral
+            cache_add_video(chat_id, sent.id, topic_id, name, size)   # aparece en la barra lateral
         except Exception as e:
             log.warning("No se pudo registrar el vídeo en la caché: %s", public_error(e))
         if file_id:
@@ -2202,13 +2242,18 @@ async def run_download_task(chat_id: int, items_to_download: list, default_dest_
             first_msg = None
 
             try:
-                for p_idx, (mid, pname) in enumerate(parts, 1):
+                for p_idx, part_info in enumerate(parts, 1):
+                    mid = part_info[0]
+                    pname = part_info[1]
                     msg = await client.get_messages(entity, ids=mid)
                     if not msg or not getattr(msg, "media", None):
                         raise RuntimeError(f"No se encontró el mensaje #{mid} ({pname}) en Telegram")
 
                     if first_msg is None:
                         first_msg = msg
+
+                    if curr_queue_item and (not curr_queue_item.get("size") or curr_queue_item.get("size") == 0):
+                        curr_queue_item["size"] = video_size(msg)
 
                     temp_part = dest_dir / f".tmp_part_{p_idx}_{uuid.uuid4().hex[:8]}.part"
                     downloaded_temp_files.append(temp_part)
@@ -2413,12 +2458,17 @@ async def start_download(
 
             _, cached_videos = read_cached(str(c_id))
             parts = []
-            for mid, (tid, vn) in cached_videos.items():
+            item_total_size = 0
+            for mid, item_val in cached_videos.items():
+                tid = item_val[0]
+                vn = item_val[1]
+                vsize = item_val[2] if len(item_val) > 2 else 0
                 if t_id is not None and tid != t_id:
                     continue
                 vn_base = get_multipart_base(vn) or vn
                 if vn_base.lower() == base.lower():
-                    parts.append((int(mid), vn))
+                    parts.append((int(mid), vn, vsize))
+                    item_total_size += vsize
 
             if parts:
                 parts.sort(key=lambda x: natural_sort_key(x[1]))
@@ -2427,6 +2477,7 @@ async def start_download(
                     "final_name": base,
                     "original_name": v_name,
                     "parts": parts,
+                    "size": it.get("size") or item_total_size,
                     "chat_id": c_id,
                     "dest_dir": it_dest_path
                 })
@@ -2448,12 +2499,17 @@ async def start_download(
         base = get_multipart_base(target_name) or target_name
 
         parts = []
-        for mid, (tid, vname) in cached_videos.items():
+        item_total_size = 0
+        for mid, item_val in cached_videos.items():
+            tid = item_val[0]
+            vname = item_val[1]
+            vsize = item_val[2] if len(item_val) > 2 else 0
             if topic is not None and tid != topic:
                 continue
             v_base = get_multipart_base(vname) or vname
             if v_base.lower() == base.lower():
-                parts.append((int(mid), vname))
+                parts.append((int(mid), vname, vsize))
+                item_total_size += vsize
 
         if not parts:
             raise HTTPException(404, f"No se encontró el vídeo '{videoName}' en Telegram")
@@ -2464,6 +2520,7 @@ async def start_download(
             "final_name": base,
             "original_name": target_name,
             "parts": parts,
+            "size": item_total_size,
             "chat_id": chat,
             "dest_dir": folder_path
         }]
@@ -2477,11 +2534,16 @@ async def start_download(
         topic = int(topicId)
         _, cached_videos = read_cached(str(chat))
         logical_dict = {}
-        for mid, (tid, vname) in cached_videos.items():
+        logical_sizes = {}
+        for mid, item_val in cached_videos.items():
+            tid = item_val[0]
+            vname = item_val[1]
+            vsize = item_val[2] if len(item_val) > 2 else 0
             if tid != topic:
                 continue
             base = get_multipart_base(vname) or vname
-            logical_dict.setdefault(base, []).append((int(mid), vname))
+            logical_dict.setdefault(base, []).append((int(mid), vname, vsize))
+            logical_sizes[base] = logical_sizes.get(base, 0) + vsize
 
         if not logical_dict:
             raise HTTPException(404, "No hay vídeos para descargar en este tema")
@@ -2493,6 +2555,7 @@ async def start_download(
                 "final_name": base,
                 "original_name": base,
                 "parts": parts,
+                "size": logical_sizes.get(base, 0),
                 "chat_id": chat,
                 "dest_dir": folder_path
             })
@@ -2509,6 +2572,7 @@ async def start_download(
             "original_name": item.get("original_name") or item["final_name"],
             "chatId": item.get("chat_id", default_chat),
             "parts": len(item["parts"]),
+            "size": item.get("size", 0),
             "current_part": 0,
             "status": "Pendiente",
             "percent": 0,
@@ -2542,16 +2606,21 @@ async def cancel_download():
 
 
 @app.post("/api/clear_downloads")
-async def clear_downloads():
-    if download_state.get("active"):
+async def clear_downloads(mode: Optional[str] = Form("completed")):
+    if mode == "all":
+        if download_state.get("active"):
+            download_state["queue"] = [
+                it for it in download_state.get("queue", [])
+                if it.get("status", "").startswith("Descargando")
+                or it.get("status", "").startswith("Uniendo")
+            ]
+        else:
+            download_state["queue"] = []
+    else:
         download_state["queue"] = [
             it for it in download_state.get("queue", [])
-            if it.get("status", "").startswith("Descargando")
-            or it.get("status", "").startswith("Uniendo")
-            or it.get("status") == "Pendiente"
+            if it.get("status") != "Finalizado OK" and it.get("status") != "Completado"
         ]
-    else:
-        download_state["queue"] = []
     return {"ok": True, "queue": download_state["queue"]}
 
 

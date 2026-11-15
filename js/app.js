@@ -67,6 +67,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const serieNuevaCheck = document.getElementById('serieNueva');
     const subcategoriaContainer = document.getElementById('subcategoriaContainer');
     const subcategoriaSelect = document.getElementById('subcategoria');
+    const subcategoriaSearch = document.getElementById('subcategoriaSearch');
+    const btnToggleSubcategoriaDropdown = document.getElementById('btnToggleSubcategoriaDropdown');
+    const btnClearSubcategoriaSearch = document.getElementById('btnClearSubcategoriaSearch');
+    const subcategoriaDropdown = document.getElementById('subcategoriaDropdown');
+    const subcategoriaCombobox = document.getElementById('subcategoriaCombobox');
+    let currentComboboxTopics = [];
+    let comboboxActiveIndex = -1;
+
     const nuevaSerieContainer = document.getElementById('nuevaSerieContainer');
     const nombreSerieInput = document.getElementById('nombreSerie');
     const temporadaInput = document.getElementById('temporada');
@@ -124,6 +132,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const downloadsTableBody = document.getElementById('downloadsTableBody');
     const checkAllDownloads = document.getElementById('checkAllDownloads');
     const btnClearCompletedDownloads = document.getElementById('btnClearCompletedDownloads');
+    const btnClearAllDownloads = document.getElementById('btnClearAllDownloads');
+    const deleteDownloadModal = document.getElementById('deleteDownloadModal');
+    const btnConfirmDeleteDownload = document.getElementById('btnConfirmDeleteDownload');
+    const btnCancelDeleteDownload = document.getElementById('btnCancelDeleteDownload');
+    const deleteAllDownloadsModal = document.getElementById('deleteAllDownloadsModal');
+    const btnConfirmDeleteAllDownloads = document.getElementById('btnConfirmDeleteAllDownloads');
+    const btnCancelDeleteAllDownloads = document.getElementById('btnCancelDeleteAllDownloads');
+    const deleteOkDownloadsModal = document.getElementById('deleteOkDownloadsModal');
+    const btnConfirmDeleteOkDownloads = document.getElementById('btnConfirmDeleteOkDownloads');
+    const btnCancelDeleteOkDownloads = document.getElementById('btnCancelDeleteOkDownloads');
+    let downloadToDeleteId = null;
 
     // Elementos de Gestión de Canales
     const btnManageChannels = document.getElementById('btnManageChannels');
@@ -529,10 +548,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (aboutVersionBadge) {
                     aboutVersionBadge.textContent = h.version;
                 }
-                if (aboutMetaBadge && (h.branch || h.commit)) {
-                    aboutMetaBadge.textContent = `${h.branch || 'main'}${h.commit ? ' @ ' + h.commit : ''}`;
-                    aboutMetaBadge.title = `Rama Git: ${h.branch || 'main'}${h.commit ? ' | Commit: ' + h.commit : ''}`;
-                    aboutMetaBadge.classList.remove('hidden');
+                if (aboutMetaBadge) {
+                    aboutMetaBadge.classList.add('hidden');
                 }
             }
 
@@ -624,6 +641,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (prevSub && !serieNuevaCheck.checked &&
                 Array.from(subcategoriaSelect.options).some(o => o.value === prevSub)) {
                 subcategoriaSelect.value = prevSub;
+                syncSubcategoriaCombobox();
             }
         }
         validateForm();
@@ -871,21 +889,244 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (currentVal) categoriaSelect.value = currentVal;
     }
 
+    function normalizeSearchText(text) {
+        if (!text) return '';
+        return text
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .trim();
+    }
+
+    function syncSubcategoriaCombobox() {
+        if (!subcategoriaSearch || !subcategoriaSelect) return;
+        const selectedId = subcategoriaSelect.value;
+        if (!selectedId) {
+            subcategoriaSearch.value = '';
+            if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.add('hidden');
+            return;
+        }
+        const opt = subcategoriaSelect.options[subcategoriaSelect.selectedIndex];
+        subcategoriaSearch.value = opt ? opt.textContent : '';
+        if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.remove('hidden');
+    }
+
+    function closeSubcategoriaDropdown() {
+        if (!subcategoriaDropdown) return;
+        subcategoriaDropdown.classList.add('hidden');
+        if (subcategoriaCombobox) subcategoriaCombobox.classList.remove('open');
+        comboboxActiveIndex = -1;
+    }
+
+    function openSubcategoriaDropdown() {
+        if (!subcategoriaDropdown || (subcategoriaSearch && subcategoriaSearch.disabled)) return;
+        renderSubcategoriaDropdown(subcategoriaSearch ? subcategoriaSearch.value : '');
+        subcategoriaDropdown.classList.remove('hidden');
+        if (subcategoriaCombobox) subcategoriaCombobox.classList.add('open');
+    }
+
+    function renderSubcategoriaDropdown(query = '') {
+        if (!subcategoriaDropdown) return;
+        subcategoriaDropdown.innerHTML = '';
+        comboboxActiveIndex = -1;
+
+        const normQuery = normalizeSearchText(query);
+        const queryTerms = normQuery.split(/\s+/).filter(Boolean);
+
+        let filtered = currentComboboxTopics;
+        if (queryTerms.length > 0) {
+            filtered = currentComboboxTopics.filter(topic => {
+                const normName = normalizeSearchText(topic.nombre);
+                return queryTerms.every(term => normName.includes(term));
+            });
+        }
+
+        if (filtered.length === 0) {
+            const noMatchesText = window.TeleVaultI18n ? window.TeleVaultI18n.t('uploads.no_subcategories_found', 'Sin coincidencias') : 'Sin coincidencias';
+            const emptyEl = document.createElement('div');
+            emptyEl.className = 'combobox-empty';
+            emptyEl.textContent = noMatchesText;
+            subcategoriaDropdown.appendChild(emptyEl);
+            return;
+        }
+
+        filtered.forEach((topic, idx) => {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'combobox-item';
+            itemEl.dataset.id = topic.id;
+            itemEl.dataset.index = idx;
+            if (String(subcategoriaSelect.value) === String(topic.id)) {
+                itemEl.classList.add('selected');
+            }
+
+            if (queryTerms.length > 0) {
+                let html = topic.nombre;
+                queryTerms.forEach(term => {
+                    const regex = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+                    html = html.replace(regex, '<mark>$1</mark>');
+                });
+                itemEl.innerHTML = `<span>${html}</span>`;
+            } else {
+                itemEl.textContent = topic.nombre;
+            }
+
+            itemEl.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                selectSubcategoriaOption(topic);
+            });
+
+            subcategoriaDropdown.appendChild(itemEl);
+        });
+
+        const selectedEl = subcategoriaDropdown.querySelector('.combobox-item.selected');
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    function selectSubcategoriaOption(topic) {
+        if (!topic) return;
+        subcategoriaSelect.value = topic.id;
+        if (subcategoriaSearch) subcategoriaSearch.value = topic.nombre;
+        if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.remove('hidden');
+        closeSubcategoriaDropdown();
+        subcategoriaSelect.dispatchEvent(new Event('change'));
+    }
+
+    function clearSubcategoriaSelection() {
+        subcategoriaSelect.value = '';
+        if (subcategoriaSearch) subcategoriaSearch.value = '';
+        if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.add('hidden');
+        closeSubcategoriaDropdown();
+        subcategoriaSelect.dispatchEvent(new Event('change'));
+    }
+
     function populateSubcategorias(grupo) {
         const selectSubText = window.TeleVaultI18n ? window.TeleVaultI18n.t('uploads.select_subcategory', 'Selecciona subcategoria') : 'Selecciona subcategoria';
         subcategoriaSelect.innerHTML = `<option value="">${selectSubText}</option>`;
-        if (!grupo) return;
+        currentComboboxTopics = [];
+        if (!grupo) {
+            subcategoriaSelect.value = '';
+            if (subcategoriaSearch) {
+                subcategoriaSearch.value = '';
+                subcategoriaSearch.disabled = true;
+            }
+            if (btnToggleSubcategoriaDropdown) btnToggleSubcategoriaDropdown.disabled = true;
+            if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.add('hidden');
+            closeSubcategoriaDropdown();
+            return;
+        }
         // Filtrar temas para no mostrar ni permitir elegir "General"
         const temasFiltrados = (grupo.temas || []).filter(
             t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general'
         );
+        currentComboboxTopics = temasFiltrados.map(t => ({ id: String(t.id), nombre: t.nombre }));
         temasFiltrados.forEach(tema => {
             const opt = document.createElement('option');
             opt.value = tema.id;
             opt.textContent = tema.nombre;
             subcategoriaSelect.appendChild(opt);
         });
+
+        if (subcategoriaSearch) {
+            subcategoriaSearch.disabled = false;
+            subcategoriaSearch.value = '';
+        }
+        if (btnToggleSubcategoriaDropdown) btnToggleSubcategoriaDropdown.disabled = false;
+        if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.classList.add('hidden');
+        closeSubcategoriaDropdown();
     }
+
+    if (subcategoriaSearch) {
+        subcategoriaSearch.addEventListener('input', () => {
+            if (btnClearSubcategoriaSearch) {
+                if (subcategoriaSearch.value.trim()) {
+                    btnClearSubcategoriaSearch.classList.remove('hidden');
+                } else {
+                    btnClearSubcategoriaSearch.classList.add('hidden');
+                }
+            }
+            openSubcategoriaDropdown();
+        });
+
+        subcategoriaSearch.addEventListener('focus', () => {
+            openSubcategoriaDropdown();
+        });
+
+        subcategoriaSearch.addEventListener('keydown', (e) => {
+            if (!subcategoriaDropdown || subcategoriaDropdown.classList.contains('hidden')) {
+                if (e.key === 'ArrowDown' || e.key === 'Enter') {
+                    openSubcategoriaDropdown();
+                    e.preventDefault();
+                }
+                return;
+            }
+
+            const items = Array.from(subcategoriaDropdown.querySelectorAll('.combobox-item'));
+            if (items.length === 0) return;
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                comboboxActiveIndex = (comboboxActiveIndex + 1) % items.length;
+                items.forEach((it, i) => it.classList.toggle('active', i === comboboxActiveIndex));
+                items[comboboxActiveIndex].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                comboboxActiveIndex = (comboboxActiveIndex - 1 + items.length) % items.length;
+                items.forEach((it, i) => it.classList.toggle('active', i === comboboxActiveIndex));
+                items[comboboxActiveIndex].scrollIntoView({ block: 'nearest' });
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (comboboxActiveIndex >= 0 && comboboxActiveIndex < items.length) {
+                    const chosenId = items[comboboxActiveIndex].dataset.id;
+                    const topic = currentComboboxTopics.find(t => String(t.id) === String(chosenId));
+                    if (topic) selectSubcategoriaOption(topic);
+                } else if (items.length === 1) {
+                    const chosenId = items[0].dataset.id;
+                    const topic = currentComboboxTopics.find(t => String(t.id) === String(chosenId));
+                    if (topic) selectSubcategoriaOption(topic);
+                }
+            } else if (e.key === 'Escape') {
+                closeSubcategoriaDropdown();
+                syncSubcategoriaCombobox();
+            }
+        });
+
+        subcategoriaSearch.addEventListener('blur', () => {
+            setTimeout(() => {
+                closeSubcategoriaDropdown();
+                syncSubcategoriaCombobox();
+            }, 200);
+        });
+    }
+
+    if (btnToggleSubcategoriaDropdown) {
+        btnToggleSubcategoriaDropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (subcategoriaSearch && subcategoriaSearch.disabled) return;
+            if (subcategoriaDropdown && !subcategoriaDropdown.classList.contains('hidden')) {
+                closeSubcategoriaDropdown();
+            } else {
+                if (subcategoriaSearch) subcategoriaSearch.focus();
+                openSubcategoriaDropdown();
+            }
+        });
+    }
+
+    if (btnClearSubcategoriaSearch) {
+        btnClearSubcategoriaSearch.addEventListener('click', (e) => {
+            e.stopPropagation();
+            clearSubcategoriaSelection();
+            if (subcategoriaSearch) subcategoriaSearch.focus();
+            openSubcategoriaDropdown();
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (subcategoriaCombobox && !subcategoriaCombobox.contains(e.target)) {
+            closeSubcategoriaDropdown();
+        }
+    });
 
     categoriaSelect.addEventListener('change', (e) => {
         const selectedId = e.target.value;
@@ -926,18 +1167,22 @@ document.addEventListener('DOMContentLoaded', async () => {
             subcategoriaContainer.classList.add('hidden');
             nuevaSerieContainer.classList.remove('hidden');
             subcategoriaSelect.value = '';
+            syncSubcategoriaCombobox();
             adjustSeriesInputWidth();
         } else {
             subcategoriaContainer.classList.remove('hidden');
             nuevaSerieContainer.classList.add('hidden');
             nombreSerieInput.value = '';
             temporadaInput.value = '';
+            subcategoriaSelect.value = '';
+            syncSubcategoriaCombobox();
             adjustSeriesInputWidth();
         }
         validateForm();
     });
 
     subcategoriaSelect.addEventListener('change', () => {
+        syncSubcategoriaCombobox();
         validateForm();
         updatePendingTransformedNames();
     });
@@ -951,6 +1196,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function setFormLocked(locked) {
         categoriaSelect.disabled = locked;
         subcategoriaSelect.disabled = locked;
+        if (subcategoriaSearch) subcategoriaSearch.disabled = locked;
+        if (btnToggleSubcategoriaDropdown) btnToggleSubcategoriaDropdown.disabled = locked;
+        if (btnClearSubcategoriaSearch) btnClearSubcategoriaSearch.disabled = locked;
+        if (locked) closeSubcategoriaDropdown();
         nombreSerieInput.disabled = locked;
         temporadaInput.disabled = locked;
         const grupo = telegramData.find(g => g.id === categoriaSelect.value);
@@ -1035,6 +1284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 populateSubcategorias(telegramData.find(g => g.id === categoryId));
                 subcategoriaSelect.value = result.topic.id;
+                syncSubcategoriaCombobox();
                 validateForm();
                 updatePendingTransformedNames();
             } else if (result.reason === "duplicate") {
@@ -1086,6 +1336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // "Reintentar" solo tiene sentido si hay archivos con error (y no se está subiendo)
         btnReintentar.disabled = uploading || !filesToUpload.some(f => f.status === 'Error en subida');
         btnReintentar.title = '';
+        checkDownloadButtonState();
     }
 
     // ------------------------------------------------- Bloqueo y Control de Descargas
@@ -1211,6 +1462,27 @@ document.addEventListener('DOMContentLoaded', async () => {
                 ? ''
                 : (window.TeleVaultI18n ? window.TeleVaultI18n.t('downloads.select_at_least_one', 'Selecciona al menos un vídeo de la tabla para descargar') : 'Selecciona al menos un vídeo de la tabla para descargar');
         }
+
+        const hasCompleted = downloadsList.some(it => it.status === 'Finalizado OK' || it.status === 'Completado');
+        const hasAnyItems = downloadsList.length > 0;
+
+        if (btnClearCompletedDownloads) {
+            btnClearCompletedDownloads.disabled = isDownloading || uploading || !hasCompleted;
+            btnClearCompletedDownloads.title = isDownloading
+                ? lockedMsg
+                : (hasCompleted
+                    ? (window.TeleVaultI18n ? window.TeleVaultI18n.t('downloads.clear_completed_title', 'Limpiar de la tabla los archivos descargados correctamente') : 'Limpiar de la tabla los archivos descargados correctamente')
+                    : '');
+        }
+
+        if (btnClearAllDownloads) {
+            btnClearAllDownloads.disabled = isDownloading || uploading || !hasAnyItems;
+            btnClearAllDownloads.title = isDownloading
+                ? lockedMsg
+                : (hasAnyItems
+                    ? (window.TeleVaultI18n ? window.TeleVaultI18n.t('downloads.clear_all_title', 'Vaciar todos los archivos de la tabla de descargas') : 'Vaciar todos los archivos de la tabla de descargas')
+                    : '');
+        }
     }
 
     function getCleanVideoBaseName(filename) {
@@ -1236,27 +1508,39 @@ document.addEventListener('DOMContentLoaded', async () => {
             return;
         }
 
-        // Contar partes binarias
+        // Contar partes binarias y calcular tamaño en bytes
         const grupo = telegramData.find(g => String(g.id) === String(chatId));
         let partsCount = 1;
+        let totalBytes = 0;
         if (grupo) {
             let vList = [];
+            let vSizes = {};
             if (topicId) {
                 const tema = (grupo.temas || []).find(t => String(t.id) === String(topicId));
-                if (tema) vList = tema.videos || [];
+                if (tema) {
+                    vList = tema.videos || [];
+                    vSizes = tema.video_sizes || {};
+                }
             } else {
                 vList = grupo.videos || [];
+                vSizes = grupo.video_sizes || {};
             }
             const matching = vList.filter(vn => getCleanVideoBaseName(vn).toLowerCase() === baseName.toLowerCase());
             if (matching.length > 1) {
                 partsCount = matching.length;
             }
+            matching.forEach(vn => {
+                if (vSizes && vSizes[vn]) {
+                    totalBytes += Number(vSizes[vn]) || 0;
+                }
+            });
         }
 
         const existing = downloadsList.find(it => String(it.chatId) === String(chatId) && it.name.toLowerCase() === baseName.toLowerCase());
         if (existing) {
             existing.dest = folder;
             existing.checked = true;
+            if (!existing.size && totalBytes > 0) existing.size = totalBytes;
             addLog(`Actualizada ubicación de '${baseName}' a '${folder}'.`, 'info');
         } else {
             downloadsList.push({
@@ -1265,6 +1549,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 topicId: topicId,
                 name: baseName,
                 parts: partsCount,
+                size: totalBytes,
                 checked: true,
                 status: 'Pendiente',
                 percent: 0,
@@ -1312,16 +1597,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const uniqueBases = new Set();
         tema.videos.forEach(v => uniqueBases.add(getCleanVideoBaseName(v)));
+        const vSizes = tema.video_sizes || {};
 
         let count = 0;
         uniqueBases.forEach(baseName => {
             const matching = (tema.videos || []).filter(vn => getCleanVideoBaseName(vn).toLowerCase() === baseName.toLowerCase());
             const partsCount = matching.length > 1 ? matching.length : 1;
+            let totalBytes = 0;
+            matching.forEach(vn => {
+                if (vSizes && vSizes[vn]) {
+                    totalBytes += Number(vSizes[vn]) || 0;
+                }
+            });
 
             const existing = downloadsList.find(it => String(it.chatId) === String(chatId) && it.name.toLowerCase() === baseName.toLowerCase());
             if (existing) {
                 existing.dest = folder;
                 existing.checked = true;
+                if (!existing.size && totalBytes > 0) existing.size = totalBytes;
             } else {
                 downloadsList.push({
                     id: 'dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
@@ -1329,6 +1622,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     topicId: topicId,
                     name: baseName,
                     parts: partsCount,
+                    size: totalBytes,
                     checked: true,
                     status: 'Pendiente',
                     percent: 0,
@@ -1357,7 +1651,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const emptyDesc = (window.TeleVaultI18n && window.TeleVaultI18n.t('downloads.empty_desc')) || 'Haz clic en el icono de descarga junto a cualquier tema o vídeo en el panel lateral para añadirlo a esta lista.';
             downloadsTableBody.innerHTML = `
                 <tr class="empty-downloads-row">
-                    <td colspan="5" class="empty-table-cell">
+                    <td colspan="6" class="empty-table-cell">
                         <div class="empty-state-box">
                             <svg class="icon-svg empty-state-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                             <div class="empty-state-text">${emptyTitle}</div>
@@ -1423,7 +1717,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             destSpan.title = item.dest || (window.TeleVaultI18n ? window.TeleVaultI18n.t('downloads.dest_unassigned', 'Se asignará al descargar') : 'Se asignará al descargar');
             tdDest.appendChild(destSpan);
 
-            // 3. Estado / Progreso
+            // 3. Tamaño
+            const tdSize = document.createElement('td');
+            tdSize.className = 'download-cell-size';
+            const sizeVal = Number(item.size) || 0;
+            tdSize.textContent = sizeVal > 0 ? window.TelegramAPI.formatBytes(sizeVal) : '-';
+            tdSize.title = sizeVal > 0 ? `${sizeVal.toLocaleString()} bytes` : '';
+
+            // 4. Estado / Progreso
             const tdProgress = document.createElement('td');
             const status = item.status || 'Pendiente';
 
@@ -1502,7 +1803,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 tdProgress.innerHTML = `<span>${status}</span>`;
             }
 
-            // 4. Acción
+            // 5. Eliminar (Acción)
             const tdAction = document.createElement('td');
             tdAction.className = 'td-delete';
             const isItemActive = status.startsWith('Descargando') || status.startsWith('Uniendo');
@@ -1516,16 +1817,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 btnDel.disabled = isDownloading;
                 btnDel.addEventListener('click', () => {
                     if (isDownloading) return;
-                    downloadsList.splice(index, 1);
-                    renderDownloadsTable();
-                    updateBadges();
-                    syncHeaderCheckbox();
-                    checkDownloadButtonState();
+                    downloadToDeleteId = item.id;
+                    if (deleteDownloadModal) {
+                        deleteDownloadModal.classList.remove('hidden');
+                    }
                 });
                 tdAction.appendChild(btnDel);
             }
 
-            tr.append(tdCheck, tdName, tdDest, tdProgress, tdAction);
+            tr.append(tdCheck, tdName, tdDest, tdSize, tdProgress, tdAction);
             downloadsTableBody.appendChild(tr);
         });
     }
@@ -1641,26 +1941,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    if (btnClearCompletedDownloads) {
-        btnClearCompletedDownloads.addEventListener('click', async () => {
-            if (isDownloading) return;
-            try {
-                await window.TelegramAPI.clearDownloads();
-                downloadsList = downloadsList.filter(item => {
-                    const s = item.status || '';
-                    return s.startsWith('Descargando') || s.startsWith('Uniendo') || s === 'En cola ⏳';
-                });
-                renderDownloadsTable();
-                updateBadges();
-                syncHeaderCheckbox();
-                checkDownloadButtonState();
-                addLog('Descargas completadas eliminadas de la lista.', 'info');
-            } catch (e) {
-                addLog(`Error al limpiar descargas: ${e.message}`, 'error');
-            }
-        });
-    }
-
     function stopDownloadTracking() {
         if (downloadEventSource) {
             try { downloadEventSource.close(); } catch (e) {}
@@ -1685,6 +1965,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (localItem) {
                     if (qItem.name && localItem.name !== qItem.name) {
                         localItem.name = qItem.name;
+                    }
+                    if (qItem.size && (!localItem.size || localItem.size === 0)) {
+                        localItem.size = qItem.size;
                     }
                     localItem.status = qItem.status;
                     localItem.percent = qItem.percent;
@@ -1724,6 +2007,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (localItem) {
                         if (qItem.name && localItem.name !== qItem.name) {
                             localItem.name = qItem.name;
+                        }
+                        if (qItem.size && (!localItem.size || localItem.size === 0)) {
+                            localItem.size = qItem.size;
                         }
                         localItem.status = qItem.status;
                         localItem.percent = qItem.percent;
@@ -2552,6 +2838,92 @@ document.addEventListener('DOMContentLoaded', async () => {
             checkUploadButtonState();
             addLog(`Se han eliminado ${totalBefore - filesToUpload.length} archivo(s) con estado 'Subido OK'.`, "info");
             if (deleteOkModal) deleteOkModal.classList.add('hidden');
+        });
+    }
+
+    // ---------------------------------------------------------------- Borrado en Descargas
+    if (btnCancelDeleteDownload && deleteDownloadModal) {
+        btnCancelDeleteDownload.addEventListener('click', () => {
+            deleteDownloadModal.classList.add('hidden');
+            downloadToDeleteId = null;
+        });
+        deleteDownloadModal.addEventListener('click', (e) => {
+            if (e.target === deleteDownloadModal) {
+                deleteDownloadModal.classList.add('hidden');
+                downloadToDeleteId = null;
+            }
+        });
+    }
+
+    if (btnConfirmDeleteDownload) {
+        btnConfirmDeleteDownload.addEventListener('click', () => {
+            if (downloadToDeleteId) {
+                downloadsList = downloadsList.filter(it => it.id !== downloadToDeleteId);
+                renderDownloadsTable();
+                checkDownloadButtonState();
+                updateBadges();
+                syncHeaderCheckbox();
+                addLog("Descarga eliminada de la lista.", "info");
+            }
+            if (deleteDownloadModal) deleteDownloadModal.classList.add('hidden');
+            downloadToDeleteId = null;
+        });
+    }
+
+    if (btnClearAllDownloads) {
+        btnClearAllDownloads.addEventListener('click', () => {
+            if (!btnClearAllDownloads.disabled && downloadsList.length > 0 && deleteAllDownloadsModal) {
+                deleteAllDownloadsModal.classList.remove('hidden');
+            }
+        });
+    }
+    if (btnCancelDeleteAllDownloads && deleteAllDownloadsModal) {
+        btnCancelDeleteAllDownloads.addEventListener('click', () => {
+            deleteAllDownloadsModal.classList.add('hidden');
+        });
+        deleteAllDownloadsModal.addEventListener('click', (e) => {
+            if (e.target === deleteAllDownloadsModal) deleteAllDownloadsModal.classList.add('hidden');
+        });
+    }
+    if (btnConfirmDeleteAllDownloads) {
+        btnConfirmDeleteAllDownloads.addEventListener('click', async () => {
+            downloadsList = [];
+            await window.TelegramAPI.clearDownloads('all');
+            renderDownloadsTable();
+            checkDownloadButtonState();
+            updateBadges();
+            syncHeaderCheckbox();
+            addLog("Se han eliminado todos los archivos de la tabla de descargas.", "warning");
+            if (deleteAllDownloadsModal) deleteAllDownloadsModal.classList.add('hidden');
+        });
+    }
+
+    if (btnClearCompletedDownloads) {
+        btnClearCompletedDownloads.addEventListener('click', () => {
+            if (!btnClearCompletedDownloads.disabled && downloadsList.some(it => it.status === 'Finalizado OK' || it.status === 'Completado') && deleteOkDownloadsModal) {
+                deleteOkDownloadsModal.classList.remove('hidden');
+            }
+        });
+    }
+    if (btnCancelDeleteOkDownloads && deleteOkDownloadsModal) {
+        btnCancelDeleteOkDownloads.addEventListener('click', () => {
+            deleteOkDownloadsModal.classList.add('hidden');
+        });
+        deleteOkDownloadsModal.addEventListener('click', (e) => {
+            if (e.target === deleteOkDownloadsModal) deleteOkDownloadsModal.classList.add('hidden');
+        });
+    }
+    if (btnConfirmDeleteOkDownloads) {
+        btnConfirmDeleteOkDownloads.addEventListener('click', async () => {
+            const totalBefore = downloadsList.length;
+            downloadsList = downloadsList.filter(it => it.status !== 'Finalizado OK' && it.status !== 'Completado');
+            await window.TelegramAPI.clearDownloads('completed');
+            renderDownloadsTable();
+            checkDownloadButtonState();
+            updateBadges();
+            syncHeaderCheckbox();
+            addLog(`Se han eliminado ${totalBefore - downloadsList.length} descarga(s) finalizadas con éxito de la tabla.`, "info");
+            if (deleteOkDownloadsModal) deleteOkDownloadsModal.classList.add('hidden');
         });
     }
 

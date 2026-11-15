@@ -175,7 +175,34 @@ def public_error(exc: BaseException) -> str:
 client: Optional[TelegramClient] = None
 bot_username = ""
 started_at = time.time()
-API_TOKEN = secrets.token_urlsafe(32)   # se inyecta en index.html; las llamadas /api lo exigen
+
+def _load_or_create_api_token() -> str:
+    """Carga el token de API persistente desde disco o genera uno nuevo de 32 bytes."""
+    token_file = DATA_DIR / ".api_token"
+    if token_file.is_file():
+        try:
+            val = token_file.read_text(encoding="utf-8").strip()
+            if len(val) >= 32:
+                return val
+        except Exception:
+            pass
+    val = secrets.token_urlsafe(32)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(val, encoding="utf-8")
+    except Exception:
+        pass
+    return val
+
+API_TOKEN = _load_or_create_api_token()
+
+# Limpiar centinela de reinicio si quedó tras una actualización previa
+_restart_flag = FRONTEND_DIR / ".restart_televault"
+if _restart_flag.is_file():
+    try:
+        _restart_flag.unlink()
+    except Exception:
+        pass
 
 selected_files = {}      # fileId -> {"path", "name", "size"}  (elegidos con el selector nativo)
 progress = {}            # clave de subida -> {"percent", "status", "ts"}
@@ -368,7 +395,7 @@ class SecurityMiddleware:
         denied = None
         if headers.get("host", "") not in ALLOWED_HOSTS:
             denied = (403, "Host no permitido")
-        elif is_api:
+        elif is_api and path != "/api/health":
             origin = headers.get("origin")
             if origin is not None and origin not in ALLOWED_ORIGINS:
                 denied = (403, "Origen no permitido")
@@ -1382,24 +1409,41 @@ def extract_binary_part(source_path: str, output_path: str, start_byte: int, len
 _last_version_check = 0.0
 _cached_version_info = {}
 
+def parse_version_tuple(v_str: str) -> tuple:
+    """Convierte una cadena de versión 'v3.3.0' en una tupla (3, 3, 0) para comparación segura."""
+    if not v_str:
+        return (0, 0, 0)
+    clean = re.sub(r'^[^\d]*', '', str(v_str).strip())
+    parts = re.split(r'[-+.]', clean)
+    nums = []
+    for p in parts:
+        if p.isdigit():
+            nums.append(int(p))
+        else:
+            break
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
 def get_app_version_info() -> dict:
-    """Detecta dinámicamente la versión, rama y commit actuales (Git o archivo VERSION)."""
+    """Detecta dinámicamente la versión, rama y commit actuales (VERSION o Git)."""
     global _last_version_check, _cached_version_info
     now = time.time()
-    if _cached_version_info and (now - _last_version_check < 5.0):
+    if _cached_version_info and (now - _last_version_check < 3.0):
         return _cached_version_info
 
-    version = "v3.2.0"
+    file_version = ""
     branch = ""
     commit = ""
+    git_tag_version = ""
 
-    # 1. Archivo VERSION manual en la raíz
+    # 1. Archivo VERSION manual en la raíz (fuente oficial y autoritativa de la release)
     version_file = FRONTEND_DIR / "VERSION"
     if version_file.is_file():
         try:
             content = version_file.read_text(encoding="utf-8").strip()
             if content:
-                version = content if content.startswith("v") else f"v{content}"
+                file_version = content if content.startswith("v") else f"v{content}"
         except Exception:
             pass
 
@@ -1426,17 +1470,32 @@ def get_app_version_info() -> dict:
             cwd=str(FRONTEND_DIR), capture_output=True, text=True, timeout=1.5
         )
         if r_t.returncode == 0 and r_t.stdout.strip():
-            version = r_t.stdout.strip()
-
-        # Si la rama activa contiene un patrón de versión explícito (ej: feature/v3.3.0 o release/3.3.0),
-        # priorizar la versión indicada en la propia rama activa de desarrollo
-        if branch:
-            m = re.search(r'(v?\d+\.\d+(?:\.\d+)?)', branch)
-            if m:
-                v_branch = m.group(1)
-                version = v_branch if v_branch.startswith("v") else f"v{v_branch}"
+            gt = r_t.stdout.strip()
+            git_tag_version = gt if gt.startswith("v") else f"v{gt}"
     except Exception as e:
         log.debug("No se pudo leer versión de git: %s", e)
+
+    # 3. Determinar la versión sin degradación:
+    # Si VERSION tiene v3.3.0 y Git tiene una etiqueta anterior (ej: v3.2.1), NUNCA degradar.
+    # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
+    version = file_version or git_tag_version or "v3.3.0"
+    if file_version and git_tag_version:
+        t_file = parse_version_tuple(file_version)
+        t_git = parse_version_tuple(git_tag_version)
+        version = git_tag_version if t_git > t_file else file_version
+    elif file_version:
+        version = file_version
+    elif git_tag_version:
+        version = git_tag_version
+
+    # 4. Si la rama activa contiene un patrón de versión explícito (ej: feature/v3.4.0), respetarla
+    if branch:
+        m = re.search(r'(v?\d+\.\d+(?:\.\d+)?)', branch)
+        if m:
+            v_branch = m.group(1)
+            v_branch_str = v_branch if v_branch.startswith("v") else f"v{v_branch}"
+            if parse_version_tuple(v_branch_str) > parse_version_tuple(version):
+                version = v_branch_str
 
     _cached_version_info = {
         "version": version,
@@ -1460,7 +1519,7 @@ async def index():
     html = html.replace("</head>", meta, 1)
 
     vinfo = get_app_version_info()
-    ver = vinfo.get("version", "v3.2.0")
+    ver = vinfo.get("version", "v3.3.0")
     html = re.sub(
         r'<span([^>]*class="[^"]*brand-version-pill[^"]*"[^>]*)>.*?</span>',
         rf'<span\1>{ver}</span>',

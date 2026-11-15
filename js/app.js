@@ -3990,7 +3990,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             addLog(`TeleVault se ha actualizado con éxito a la versión ${result.version || tag}.`, 'success');
 
             // Countdown para recarga automática
-            let countdown = 3;
+            let countdown = 2;
+            const targetUrl = window.location.origin + window.location.pathname + '?v=' + Date.now();
+            if (updateProgressStatus) {
+                const reloadText = window.TeleVaultI18n
+                    ? window.TeleVaultI18n.t('modals.updater.reloading_in', `Recargando en ${countdown}s...`, { n: countdown })
+                    : `Recargando en ${countdown}s...`;
+                updateProgressStatus.textContent = `${result.message || 'Actualizado correctamente.'} ${reloadText}`;
+            }
+
             const timer = setInterval(() => {
                 countdown--;
                 if (updateProgressStatus) {
@@ -4001,7 +4009,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 if (countdown <= 0) {
                     clearInterval(timer);
-                    // Polling de salud hasta que el servidor vuelva a responder
                     pollServerAndReload();
                 }
             }, 1000);
@@ -4021,24 +4028,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function pollServerAndReload() {
         let attempts = 0;
-        const maxAttempts = 30; // 30 segundos
+        const maxAttempts = 25;
+        const targetUrl = window.location.origin + window.location.pathname + '?v=' + Date.now();
         const check = async () => {
             attempts++;
             try {
-                const res = await fetch('/api/health?t=' + Date.now());
-                if (res.ok) {
-                    window.location.reload(true);
+                const res = await fetch('/api/health?_t=' + Date.now(), { cache: 'no-store' });
+                if (res.status === 200 || res.status === 401) {
+                    window.location.replace(targetUrl);
                     return;
                 }
-            } catch (e) {}
+            } catch (e) {
+                // Servidor reiniciándose
+            }
 
             if (attempts < maxAttempts) {
-                setTimeout(check, 1000);
+                setTimeout(check, 600);
             } else {
-                window.location.reload(true);
+                window.location.replace(targetUrl);
             }
         };
-        setTimeout(check, 1500);
+        setTimeout(check, 800);
     }
 
     if (btnUpdateNotification) {

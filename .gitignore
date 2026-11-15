@@ -26,6 +26,11 @@ backend/*.tmp
 backend/temp_uploads/
 backend/logs/
 
+# Tokens de sesión y centinelas de actualización
+.api_token
+backend/.api_token
+.restart_televault
+
 # Configuracion de editor / IDE
 .vscode/
 .idea/

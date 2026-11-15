@@ -100,7 +100,7 @@ def get_current_app_version() -> str:
         except Exception:
             pass
     # Fallback por defecto
-    return "v3.3.0"
+    return "v3.3.1"
 
 
 def check_github_update(current_version: Optional[str] = None, force: bool = False) -> Dict[str, Any]:

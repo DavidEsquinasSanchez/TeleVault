@@ -34,6 +34,11 @@ from telethon.tl.functions.messages import CheckChatInviteRequest
 
 from parallel_upload import UploadState, upload_file_parallel
 
+try:
+    from backend.updater import check_github_update, download_and_extract_update, schedule_restart
+except ImportError:
+    from updater import check_github_update, download_and_extract_update, schedule_restart
+
 def _load_env():
     base = Path(__file__).resolve().parent
     for candidate in (base.parent / ".env", base / ".env"):
@@ -1498,6 +1503,70 @@ async def health():
 async def get_version():
     """Devuelve la información dinámica de versión, rama y commit."""
     return get_app_version_info()
+
+
+@app.get("/api/check_update")
+async def check_update_endpoint(force: bool = False):
+    """Comprueba si existe una versión más reciente de TeleVault en GitHub."""
+    vinfo = get_app_version_info()
+    curr_ver = vinfo.get("version", "v3.2.0")
+    try:
+        res = await asyncio.to_thread(check_github_update, curr_ver, force)
+        return res
+    except Exception as e:
+        log.warning("Excepción al comprobar actualización: %s", e)
+        return {
+            "ok": False,
+            "error": str(e),
+            "current_version": curr_ver,
+            "update_available": False
+        }
+
+
+@app.post("/api/install_update")
+async def install_update_endpoint(
+    request: Request,
+    tag: Optional[str] = Form(None),
+    downloadUrl: Optional[str] = Form(None)
+):
+    """
+    Descarga e instala la actualización oficial desde GitHub de forma segura,
+    sin tocar credenciales, sesiones ni base de datos local, y reinicia el servidor.
+    """
+    global active_uploads, active_download_task
+
+    if active_uploads:
+        raise HTTPException(
+            status_code=409,
+            detail="Hay subidas activas en curso. Espera a que finalicen antes de actualizar."
+        )
+    if active_download_task and not active_download_task.done():
+        raise HTTPException(
+            status_code=409,
+            detail="Hay descargas activas en curso. Espera a que finalicen antes de actualizar."
+        )
+
+    target_tag = tag
+    target_url = downloadUrl
+
+    # Permitir también JSON en el cuerpo si la petición fue enviada como application/json
+    c_type = request.headers.get("content-type", "")
+    if "application/json" in c_type:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                target_tag = body.get("tag") or target_tag
+                target_url = body.get("download_url") or body.get("downloadUrl") or target_url
+        except Exception:
+            pass
+
+    try:
+        result = await asyncio.to_thread(download_and_extract_update, target_tag, target_url)
+        schedule_restart(delay_secs=1.5)
+        return result
+    except Exception as e:
+        log.error("Error durante la instalación de la actualización: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/config/bot")

@@ -335,8 +335,9 @@ async def lifespan(app: FastAPI):
             cfg["bot_username"] = bot_username
             save_app_config(cfg)
             log.info("Conectado a Telegram como bot @%s", bot_username)
-            # Escaneo inicial en segundo plano
+            # Escaneo inicial y backfill de tamaños en segundo plano
             refresh_task = asyncio.create_task(refresh_all(False))
+            asyncio.create_task(backfill_missing_video_sizes())
         except Exception as e:
             log.error("No se pudo conectar a Telegram con el token actual: %s", public_error(e))
             client = None
@@ -997,7 +998,7 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
             msgs = await get_messages_by_ids(entity, chunk)
             for mid, m in zip(chunk, msgs):
                 if m and is_video(m):
-                    videos[str(mid)] = [raw_topic_of(m), video_name(m)]
+                    videos[str(mid)] = [raw_topic_of(m), video_name(m), video_size(m)]
                 else:
                     videos.pop(str(mid), None)
 
@@ -1128,6 +1129,67 @@ async def load_group(identifier, rescan: bool = False):
     except Exception as e:
         log.error("No se pudo resolver el canal %s: %s", identifier, public_error(e), exc_info=True)
         return await group_from_cache(identifier)
+
+
+async def backfill_missing_video_sizes():
+    """
+    Rellena en segundo plano los tamaños de vídeos en topics_cache.json
+    para cualquier entrada antigua que no tenga el campo 'size' o sea 0.
+    Se ejecuta de forma paulatina para no saturar los límites de Telegram.
+    """
+    await asyncio.sleep(4)
+    try:
+        if not client or not client.is_connected():
+            return
+        cache = load_cache()
+        for chat_id_str, chat_data in list(cache.items()):
+            videos = chat_data.get("videos", {})
+            missing_mids = [
+                int(mid) for mid, val in videos.items()
+                if len(val) < 3 or not val[2]
+            ]
+            if not missing_mids:
+                continue
+
+            try:
+                entity = await client.get_entity(int(chat_id_str))
+            except Exception as e:
+                log.debug("No se pudo obtener entidad para backfill de tamaños (%s): %s", chat_id_str, e)
+                continue
+
+            log.info("[BACKFILL] Canal %s: completando tamaño de %d vídeos...", chat_id_str, len(missing_mids))
+            batch_size = SCAN_BATCH
+            for i in range(0, len(missing_mids), batch_size):
+                chunk = missing_mids[i:i + batch_size]
+                try:
+                    msgs = await get_messages_by_ids(entity, chunk)
+                    fetched_sizes = {}
+                    for mid, m in zip(chunk, msgs):
+                        if m and is_video(m):
+                            fetched_sizes[str(mid)] = video_size(m)
+                        elif m is None:
+                            fetched_sizes[str(mid)] = None
+
+                    def apply_updates(e):
+                        vids = e.setdefault("videos", {})
+                        for mid_str, sz in fetched_sizes.items():
+                            if sz is None:
+                                vids.pop(mid_str, None)
+                            elif mid_str in vids:
+                                cur = vids[mid_str]
+                                if len(cur) >= 3:
+                                    cur[2] = sz
+                                elif len(cur) == 2:
+                                    cur.append(sz)
+
+                    update_cache_entry(chat_id_str, apply_updates)
+                    await asyncio.sleep(0.3)
+                except Exception as ex:
+                    log.warning("[BACKFILL] Error en lote de mensajes: %s", ex)
+                    await asyncio.sleep(1)
+            log.info("[BACKFILL] Canal %s: completado.", chat_id_str)
+    except Exception as e:
+        log.warning("Error en backfill_missing_video_sizes: %s", e)
 
 
 async def refresh_all(rescan: bool = False) -> list:
@@ -2380,8 +2442,20 @@ async def run_download_task(chat_id: int, items_to_download: list, default_dest_
                     if first_msg is None:
                         first_msg = msg
 
+                    msg_sz = video_size(msg)
+                    if msg_sz > 0:
+                        try:
+                            update_cache_entry(str(item_chat_id), lambda e: (
+                                e.get("videos", {}).get(str(mid)) and len(e["videos"][str(mid)]) >= 2 and (
+                                    e["videos"][str(mid)].__setitem__(2, msg_sz) if len(e["videos"][str(mid)]) > 2 else e["videos"][str(mid)].append(msg_sz)
+                                )
+                            ))
+                        except Exception:
+                            pass
+
                     if curr_queue_item and (not curr_queue_item.get("size") or curr_queue_item.get("size") == 0):
-                        curr_queue_item["size"] = video_size(msg)
+                        total_parts_sz = sum(p[2] if len(p) > 2 and p[2] > 0 else (msg_sz if p[0] == mid else 0) for p in parts)
+                        curr_queue_item["size"] = total_parts_sz or msg_sz
 
                     temp_part = dest_dir / f".tmp_part_{p_idx}_{uuid.uuid4().hex[:8]}.part"
                     downloaded_temp_files.append(temp_part)
@@ -2542,6 +2616,92 @@ async def select_folder():
     return {"folder": folder or ""}
 
 
+@app.get("/api/video_size")
+async def get_video_size(chatId: str, videoName: str, topicId: Optional[str] = None):
+    """
+    Devuelve el tamaño total (sumando todas las partes si es fraccionado)
+    y la cantidad de partes de un vídeo. Si el tamaño no está en caché o es 0,
+    lo consulta directamente a Telegram y actualiza topics_cache.json de forma atómica.
+    """
+    if not chatId or not videoName:
+        return {"size": 0, "parts": 1}
+
+    try:
+        chat = validate_chat(chatId)
+    except Exception:
+        return {"size": 0, "parts": 1}
+
+    clean_name = str(videoName).strip()
+    base = get_multipart_base(clean_name) or clean_name
+    t_id = None
+    if topicId is not None and str(topicId).strip() and str(topicId) != "null":
+        try:
+            t_id = int(topicId)
+        except ValueError:
+            t_id = None
+
+    cache = load_cache()
+    cached_chat = cache.get(str(chat), {})
+    cached_videos = cached_chat.get("videos", {})
+
+    matching_parts = []
+    for mid_str, item in cached_videos.items():
+        if len(item) < 2:
+            continue
+        tid = item[0]
+        vname = item[1]
+        vsize = item[2] if len(item) > 2 else 0
+        if t_id is not None and tid != t_id:
+            continue
+        v_base = get_multipart_base(vname) or vname
+        if v_base.lower() == base.lower():
+            matching_parts.append((int(mid_str), vname, vsize))
+
+    if not matching_parts:
+        return {"size": 0, "parts": 1}
+
+    matching_parts.sort(key=lambda x: natural_sort_key(x[1]))
+    num_parts = len(matching_parts)
+
+    missing_mids = [mid for mid, vname, sz in matching_parts if sz <= 0]
+    if not missing_mids:
+        total_size = sum(sz for _, _, sz in matching_parts)
+        return {"size": total_size, "parts": num_parts}
+
+    if client and client.is_connected():
+        try:
+            entity = await client.get_entity(chat)
+            msgs = await get_messages_by_ids(entity, missing_mids)
+            fetched_sizes = {}
+            for mid, m in zip(missing_mids, msgs):
+                if m and is_video(m):
+                    fetched_sizes[mid] = video_size(m)
+
+            def update_entry(e):
+                vids = e.setdefault("videos", {})
+                for mid, sz in fetched_sizes.items():
+                    mid_s = str(mid)
+                    if mid_s in vids:
+                        cur = vids[mid_s]
+                        if len(cur) >= 3:
+                            cur[2] = sz
+                        elif len(cur) == 2:
+                            cur.append(sz)
+
+            update_cache_entry(str(chat), update_entry)
+
+            total_size = 0
+            for mid, vname, sz in matching_parts:
+                total_size += fetched_sizes.get(mid, sz)
+
+            return {"size": total_size, "parts": num_parts}
+        except Exception as e:
+            log.warning("No se pudo obtener tamaño en vivo para '%s': %s", base, e)
+
+    total_size = sum(sz for _, _, sz in matching_parts)
+    return {"size": total_size, "parts": num_parts}
+
+
 @app.post("/api/download")
 async def start_download(
     destFolder: Optional[str] = Form(None),
@@ -2605,7 +2765,7 @@ async def start_download(
                     "final_name": base,
                     "original_name": v_name,
                     "parts": parts,
-                    "size": it.get("size") or item_total_size,
+                    "size": int(it.get("size") or 0) or item_total_size,
                     "chat_id": c_id,
                     "dest_dir": it_dest_path
                 })

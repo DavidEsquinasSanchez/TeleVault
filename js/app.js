@@ -1547,8 +1547,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             existing.checked = true;
             if (!existing.size && totalBytes > 0) existing.size = totalBytes;
             addLog(`Actualizada ubicación de '${baseName}' a '${folder}'.`, 'info');
+            if ((!existing.size || existing.size === 0) && window.TelegramAPI && window.TelegramAPI.resolveVideoSize) {
+                window.TelegramAPI.resolveVideoSize(chatId, baseName, topicId).then(res => {
+                    if (res && res.size > 0) {
+                        existing.size = res.size;
+                        if (res.parts && res.parts > (existing.parts || 1)) existing.parts = res.parts;
+                        renderDownloadsTable();
+                    }
+                }).catch(() => {});
+            }
         } else {
-            downloadsList.push({
+            const newItem = {
                 id: 'dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
                 chatId: chatId,
                 topicId: topicId,
@@ -1562,9 +1571,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 eta: null,
                 dest: folder,
                 error: null
-            });
+            };
+            downloadsList.push(newItem);
             const partInfo = partsCount > 1 ? ` (${partsCount} partes binarias)` : '';
             addLog(`Añadido a la lista de descargas: '${baseName}'${partInfo} -> '${folder}'`, 'info');
+            if (totalBytes === 0 && window.TelegramAPI && window.TelegramAPI.resolveVideoSize) {
+                window.TelegramAPI.resolveVideoSize(chatId, baseName, topicId).then(res => {
+                    if (res && res.size > 0) {
+                        newItem.size = res.size;
+                        if (res.parts && res.parts > (newItem.parts || 1)) newItem.parts = res.parts;
+                        renderDownloadsTable();
+                    }
+                }).catch(() => {});
+            }
         }
 
         if (switchTabToDownloads) {
@@ -1620,8 +1639,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 existing.dest = folder;
                 existing.checked = true;
                 if (!existing.size && totalBytes > 0) existing.size = totalBytes;
+                if ((!existing.size || existing.size === 0) && window.TelegramAPI && window.TelegramAPI.resolveVideoSize) {
+                    window.TelegramAPI.resolveVideoSize(chatId, baseName, topicId).then(res => {
+                        if (res && res.size > 0) {
+                            existing.size = res.size;
+                            if (res.parts && res.parts > (existing.parts || 1)) existing.parts = res.parts;
+                            renderDownloadsTable();
+                        }
+                    }).catch(() => {});
+                }
             } else {
-                downloadsList.push({
+                const newItem = {
                     id: 'dl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
                     chatId: chatId,
                     topicId: topicId,
@@ -1635,7 +1663,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                     eta: null,
                     dest: folder,
                     error: null
-                });
+                };
+                downloadsList.push(newItem);
+                if (totalBytes === 0 && window.TelegramAPI && window.TelegramAPI.resolveVideoSize) {
+                    window.TelegramAPI.resolveVideoSize(chatId, baseName, topicId).then(res => {
+                        if (res && res.size > 0) {
+                            newItem.size = res.size;
+                            if (res.parts && res.parts > (newItem.parts || 1)) newItem.parts = res.parts;
+                            renderDownloadsTable();
+                        }
+                    }).catch(() => {});
+                }
             }
             count++;
         });
@@ -1726,8 +1764,28 @@ document.addEventListener('DOMContentLoaded', async () => {
             const tdSize = document.createElement('td');
             tdSize.className = 'download-cell-size';
             const sizeVal = Number(item.size) || 0;
-            tdSize.textContent = sizeVal > 0 ? window.TelegramAPI.formatBytes(sizeVal) : '-';
-            tdSize.title = sizeVal > 0 ? `${sizeVal.toLocaleString()} bytes` : '';
+            if (sizeVal > 0) {
+                tdSize.textContent = window.TelegramAPI.formatBytes(sizeVal);
+                tdSize.title = `${sizeVal.toLocaleString()} bytes`;
+            } else {
+                tdSize.textContent = item._fetchingSize ? '…' : '-';
+                tdSize.title = '';
+                if (!item._fetchingSize && window.TelegramAPI && window.TelegramAPI.resolveVideoSize && item.chatId && item.name) {
+                    item._fetchingSize = true;
+                    window.TelegramAPI.resolveVideoSize(item.chatId, item.name, item.topicId).then(res => {
+                        item._fetchingSize = false;
+                        if (res && res.size > 0) {
+                            item.size = res.size;
+                            if (res.parts && res.parts > (item.parts || 1)) {
+                                item.parts = res.parts;
+                            }
+                            renderDownloadsTable();
+                        }
+                    }).catch(() => {
+                        item._fetchingSize = false;
+                    });
+                }
+            }
 
             // 4. Estado / Progreso
             const tdProgress = document.createElement('td');

@@ -288,6 +288,27 @@ const TelegramAPI = {
         }
     },
 
+    // Consulta y resuelve el tamaño total de un vídeo (sumando partes) desde el backend
+    async resolveVideoSize(chatId, videoName, topicId = null) {
+        if (!chatId || !videoName) return { size: 0, parts: 1 };
+        try {
+            const params = new URLSearchParams({
+                chatId: String(chatId),
+                videoName: String(videoName)
+            });
+            if (topicId !== null && topicId !== undefined && String(topicId).trim() !== '' && String(topicId) !== 'null') {
+                params.append('topicId', String(topicId));
+            }
+            const response = await apiFetch(`/video_size?${params.toString()}`);
+            if (response.ok) {
+                return await response.json();
+            }
+            return { size: 0, parts: 1 };
+        } catch (e) {
+            return { size: 0, parts: 1 };
+        }
+    },
+
     // Formato de bytes a KB / MB / GB
     formatBytes(bytes) {
         if (!bytes || bytes <= 0) return '0 B';

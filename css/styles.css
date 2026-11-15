@@ -2599,17 +2599,19 @@ body.light-theme .destination-badge {
 }
 
 .download-toolbar-left {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    flex: 1 1 auto;
 }
 
 .download-toolbar-maintenance {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    margin-left: auto;
 }
 
 .download-cell-size {
@@ -2622,17 +2624,13 @@ body.light-theme .destination-badge {
     font-variant-numeric: tabular-nums;
 }
 
-.download-toolbar-right {
-    display: flex;
-    align-items: center;
-}
-
 .download-toolbar-hint {
     font-size: 0.82rem;
     color: var(--text-muted);
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
+    margin-left: 6px;
 }
 
 .download-toolbar-hint .hint-icon {

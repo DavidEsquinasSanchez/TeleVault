@@ -30,16 +30,22 @@ GITHUB_LATEST_RELEASE_URL = f"https://api.github.com/repos/{GITHUB_REPO}/release
 GITHUB_ARCHIVE_URL_TEMPLATE = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{{tag}}.zip"
 
 # Archivos y carpetas protegidos que NUNCA deben sobrescribirse durante una actualización
-PROTECTED_PATHS = {
-    ".env",
-    ".env.local",
-    "config.json",
+PROTECTED_ROOT_DIRS = {
     "data",
     "logs",
     ".git",
-    ".venv",
-    ".tmp_update.zip",
-    ".restart_televault"
+    ".venv"
+}
+
+PROTECTED_FILENAMES = {
+    ".env",
+    ".env.local",
+    "config.json",
+    "channels.json",
+    "topics_cache.json",
+    ".api_token",
+    ".restart_televault",
+    ".tmp_update.zip"
 }
 
 _cached_update_check: Optional[Dict[str, Any]] = None
@@ -68,12 +74,15 @@ def is_protected(rel_path: str) -> bool:
     normalized = rel_path.replace("\\", "/").strip("/")
     parts = normalized.split("/")
     first_part = parts[0].lower()
+    filename = parts[-1].lower()
 
-    if first_part in {p.lower() for p in PROTECTED_PATHS}:
+    if first_part in {d.lower() for d in PROTECTED_ROOT_DIRS}:
         return True
 
-    # Proteger también sesiones de Telethon (.session y .session-journal)
-    filename = parts[-1].lower()
+    if filename in {f.lower() for f in PROTECTED_FILENAMES}:
+        return True
+
+    # Proteger también sesiones de Telethon (.session y .session-journal) en cualquier subcarpeta
     if filename.endswith(".session") or filename.endswith(".session-journal"):
         return True
 
@@ -172,6 +181,18 @@ def check_github_update(current_version: Optional[str] = None, force: bool = Fal
         }
 
 
+def get_requirements_hash() -> str:
+    """Devuelve un hash SHA-256 de requirements.txt si existe para detectar cambios."""
+    req_txt = FRONTEND_DIR / "requirements.txt"
+    if not req_txt.is_file():
+        return ""
+    try:
+        import hashlib
+        return hashlib.sha256(req_txt.read_bytes()).hexdigest()
+    except Exception:
+        return ""
+
+
 def download_and_extract_update(
     target_tag: Optional[str] = None,
     download_url: Optional[str] = None,
@@ -190,6 +211,8 @@ def download_and_extract_update(
             raise RuntimeError(f"No se pudo consultar la release oficial: {info.get('error')}")
         target_tag = info["latest_version"]
         download_url = info.get("download_url") or GITHUB_ARCHIVE_URL_TEMPLATE.format(tag=target_tag)
+
+    req_hash_before = get_requirements_hash()
 
     if progress_callback:
         progress_callback(f"Descargando versión {target_tag}...", 20)
@@ -275,11 +298,14 @@ def download_and_extract_update(
     except Exception as e:
         log.warning("No se pudo escribir archivo VERSION: %s", e)
 
-    # Verificar si requirements.txt necesita actualización
-    if progress_callback:
-        progress_callback("Comprobando dependencias de Python...", 90)
-
-    run_pip_install_if_needed()
+    # Verificar si requirements.txt necesita actualización solo si cambió
+    req_hash_after = get_requirements_hash()
+    if req_hash_before and req_hash_after and req_hash_before != req_hash_after:
+        if progress_callback:
+            progress_callback("Actualizando dependencias de Python...", 90)
+        run_pip_install_if_needed()
+    else:
+        log.info("requirements.txt no ha cambiado; omitiendo ejecución de pip.")
 
     if progress_callback:
         progress_callback("¡Actualización completada con éxito!", 100)
@@ -326,6 +352,11 @@ def schedule_restart(delay_secs: float = 1.0) -> None:
 
         # Si no está gestionado por iniciar.bat, relanzar directamente con subprocess
         if os.environ.get("TELEVAULT_MANAGED_BY_BAT") != "1":
+            try:
+                if restart_flag.is_file():
+                    restart_flag.unlink()
+            except Exception:
+                pass
             try:
                 main_py = FRONTEND_DIR / "backend" / "main.py"
                 creationflags = 0

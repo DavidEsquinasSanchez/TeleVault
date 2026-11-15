@@ -175,7 +175,34 @@ def public_error(exc: BaseException) -> str:
 client: Optional[TelegramClient] = None
 bot_username = ""
 started_at = time.time()
-API_TOKEN = secrets.token_urlsafe(32)   # se inyecta en index.html; las llamadas /api lo exigen
+
+def _load_or_create_api_token() -> str:
+    """Carga el token de API persistente desde disco o genera uno nuevo de 32 bytes."""
+    token_file = DATA_DIR / ".api_token"
+    if token_file.is_file():
+        try:
+            val = token_file.read_text(encoding="utf-8").strip()
+            if len(val) >= 32:
+                return val
+        except Exception:
+            pass
+    val = secrets.token_urlsafe(32)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        token_file.write_text(val, encoding="utf-8")
+    except Exception:
+        pass
+    return val
+
+API_TOKEN = _load_or_create_api_token()
+
+# Limpiar centinela de reinicio si quedó tras una actualización previa
+_restart_flag = FRONTEND_DIR / ".restart_televault"
+if _restart_flag.is_file():
+    try:
+        _restart_flag.unlink()
+    except Exception:
+        pass
 
 selected_files = {}      # fileId -> {"path", "name", "size"}  (elegidos con el selector nativo)
 progress = {}            # clave de subida -> {"percent", "status", "ts"}
@@ -368,7 +395,7 @@ class SecurityMiddleware:
         denied = None
         if headers.get("host", "") not in ALLOWED_HOSTS:
             denied = (403, "Host no permitido")
-        elif is_api:
+        elif is_api and path != "/api/health":
             origin = headers.get("origin")
             if origin is not None and origin not in ALLOWED_ORIGINS:
                 denied = (403, "Origen no permitido")

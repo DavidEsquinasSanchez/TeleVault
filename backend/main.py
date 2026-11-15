@@ -1476,9 +1476,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.3.0 y Git tiene una etiqueta anterior (ej: v3.2.1), NUNCA degradar.
+    # Si VERSION tiene v3.3.1 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.3.0"
+    version = file_version or git_tag_version or "v3.3.1"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -1519,7 +1519,7 @@ async def index():
     html = html.replace("</head>", meta, 1)
 
     vinfo = get_app_version_info()
-    ver = vinfo.get("version", "v3.3.0")
+    ver = vinfo.get("version", "v3.3.1")
     html = re.sub(
         r'<span([^>]*class="[^"]*brand-version-pill[^"]*"[^>]*)>.*?</span>',
         rf'<span\1>{ver}</span>',

@@ -126,6 +126,94 @@ def purge_temp_dir(max_age_seconds: Optional[float] = None):
                 pass
 
 
+def _safe_unlink(path: Path, retries: int = 3, delay: float = 0.1) -> bool:
+    """Elimina un archivo temporal con reintentos breves por si Windows aún libera el handle."""
+    if not isinstance(path, Path):
+        return False
+    for attempt in range(retries):
+        try:
+            if not path.is_file():
+                return True
+            path.unlink()
+            return True
+        except PermissionError:
+            if attempt < retries - 1:
+                time.sleep(delay)
+        except FileNotFoundError:
+            return True
+        except Exception:
+            return False
+    return False
+
+
+def remember_download_dir(dest_dir: Path) -> None:
+    """Registra carpetas de destino usadas en descargas para poder limpiar temporales huérfanos tras un cierre brusco."""
+    try:
+        resolved = str(dest_dir.resolve())
+        cfg = load_app_config()
+        recent = list(cfg.get("recent_download_dirs") or [])
+        if resolved in recent:
+            recent.remove(resolved)
+        recent.insert(0, resolved)
+        cfg["recent_download_dirs"] = recent[:15]
+        save_app_config(cfg)
+    except Exception:
+        pass
+
+
+def purge_download_temps(extra_dirs=None) -> None:
+    """Elimina temporales huérfanos de descarga (.tmp_part_*.part / .tmp_merged_*.tmp) en carpetas de destino conocidas."""
+    dirs_to_check = set()
+    try:
+        default_dl = Path.home() / "Downloads"
+        if default_dl.is_dir():
+            dirs_to_check.add(default_dl.resolve())
+    except Exception:
+        pass
+    try:
+        cfg = load_app_config()
+        for d in (cfg.get("recent_download_dirs") or []):
+            p = Path(d)
+            if p.is_dir():
+                dirs_to_check.add(p.resolve())
+    except Exception:
+        pass
+    if extra_dirs:
+        for d in extra_dirs:
+            try:
+                p = Path(d)
+                if p.is_dir():
+                    dirs_to_check.add(p.resolve())
+            except Exception:
+                pass
+
+    removed_count = 0
+    removed_bytes = 0
+    for directory in dirs_to_check:
+        try:
+            for f in directory.iterdir():
+                if not f.is_file():
+                    continue
+                name = f.name
+                is_dl_part = name.startswith(".tmp_part_") and name.endswith(".part")
+                is_dl_merged = name.startswith(".tmp_merged_") and name.endswith(".tmp")
+                if not (is_dl_part or is_dl_merged):
+                    continue
+                try:
+                    sz = f.stat().st_size
+                except Exception:
+                    sz = 0
+                if _safe_unlink(f):
+                    removed_count += 1
+                    removed_bytes += sz
+        except Exception:
+            pass
+
+    if removed_count > 0:
+        log.info("Limpieza de temporales huérfanos de descarga: %d archivo(s) eliminado(s) (%.2f MB liberados)",
+                 removed_count, removed_bytes / (1024 * 1024))
+
+
 # ---------------------------------------------------------------------------
 # LOGGING (consola + archivo con rotación, con los secretos ocultos)
 # ---------------------------------------------------------------------------
@@ -308,6 +396,7 @@ class SpeedTracker:
 async def lifespan(app: FastAPI):
     global client, bot_username, refresh_task
     purge_temp_dir()
+    purge_download_temps()
     import telethon
     log.info("Telethon %s (%s)", telethon.__version__, Path(telethon.__file__).parent)
     try:
@@ -367,6 +456,7 @@ async def lifespan(app: FastAPI):
     all_tasks = [t for t in (refresh_task, active_download_task, *active_uploads.values()) if t]
     await asyncio.gather(*all_tasks, return_exceptions=True)
     purge_temp_dir()
+    purge_download_temps()
     if client and client.is_connected():
         await client.disconnect()
 
@@ -2563,11 +2653,10 @@ async def upload_selected(
         active_uploads.pop(key, None)
         cancelled_uploads.discard(key)
         if temp_part_file and temp_part_file.is_file():
-            try:
-                temp_part_file.unlink()
+            if _safe_unlink(temp_part_file):
                 log.info("Fragmento temporal eliminado tras la subida o cancelación: %s", temp_part_file.name)
-            except Exception:
-                pass
+            else:
+                log.warning("No se pudo eliminar el fragmento temporal (se limpiará al reiniciar): %s", temp_part_file.name)
 
 
 @app.post("/api/cancel")
@@ -2719,6 +2808,7 @@ async def run_download_task(chat_id: int, items_to_download: list, default_dest_
             item_dest_dir = Path(item.get("dest_dir") or default_dest_dir)
             dest_dir = item_dest_dir
             download_state["dest_dir"] = str(dest_dir)
+            remember_download_dir(dest_dir)
 
             item_chat_id = item.get("chat_id", chat_id)
             entity = await client.get_entity(item_chat_id)
@@ -2818,16 +2908,16 @@ async def run_download_task(chat_id: int, items_to_download: list, default_dest_
                     if curr_queue_item:
                         curr_queue_item["status"] = f"Uniendo {num_parts} partes..."
                     add_download_log(f"Uniendo {num_parts} partes binarias en un único archivo...", "info")
+                    part_files = list(downloaded_temp_files)
                     merged_tmp = dest_dir / f".tmp_merged_{uuid.uuid4().hex[:8]}.tmp"
+                    # Registrar merged_tmp ANTES de abrirlo para garantizar limpieza si se cancela o falla
+                    downloaded_temp_files.append(merged_tmp)
                     with open(merged_tmp, "wb") as f_out:
-                        for p in downloaded_temp_files:
+                        for p in part_files:
                             with open(p, "rb") as f_in:
                                 shutil.copyfileobj(f_in, f_out, length=16*1024*1024)
-                            try:
-                                p.unlink()
-                            except Exception:
-                                pass
-                    downloaded_temp_files = [merged_tmp]
+                            if _safe_unlink(p) and p in downloaded_temp_files:
+                                downloaded_temp_files.remove(p)
                     assembly_file = merged_tmp
                 else:
                     assembly_file = downloaded_temp_files[0]
@@ -2857,13 +2947,12 @@ async def run_download_task(chat_id: int, items_to_download: list, default_dest_
                 add_download_log(f"[ÉXITO] Guardado archivo completo: '{final_name}'", "success")
 
             except (asyncio.CancelledError, Exception) as e:
-                for p in downloaded_temp_files:
+                for p in list(downloaded_temp_files):
                     if isinstance(p, Path) and p.is_file():
-                        try:
-                            p.unlink()
+                        if _safe_unlink(p):
                             log.info("Archivo temporal de descarga eliminado tras error o cancelación: %s", p.name)
-                        except Exception:
-                            pass
+                        else:
+                            log.warning("No se pudo eliminar el temporal de descarga (se reintentará al reiniciar): %s", p.name)
                 downloaded_temp_files.clear()
                 if isinstance(e, asyncio.CancelledError):
                     raise

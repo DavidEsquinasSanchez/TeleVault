@@ -29,7 +29,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
-from telethon import TelegramClient, errors, functions, types, utils
+from telethon import TelegramClient, errors, events, functions, types, utils
 from telethon.tl.functions.messages import CheckChatInviteRequest
 
 from parallel_upload import UploadState, upload_file_parallel
@@ -335,6 +335,13 @@ async def lifespan(app: FastAPI):
             cfg["bot_username"] = bot_username
             save_app_config(cfg)
             log.info("Conectado a Telegram como bot @%s", bot_username)
+            register_bot_events(client)
+            # Restaurar caché desde Telegram Cloud si es más reciente antes del escaneo
+            if cfg.get("owner_chat_id"):
+                try:
+                    await restore_cloud_cache_backup(manual=False)
+                except Exception as e:
+                    log.warning("[CLOUD CACHE] No se pudo restaurar en inicio: %s", public_error(e))
             # Escaneo inicial y backfill de tamaños en segundo plano
             refresh_task = asyncio.create_task(refresh_all(False))
             asyncio.create_task(backfill_missing_video_sizes())
@@ -548,6 +555,231 @@ def save_channels(channels: list) -> None:
     os.replace(tmp, CHANNELS_FILE)
 
 
+# ---------------------------------------------------------------------------
+# COPIA DE SEGURIDAD EN LA NUBE (Telegram Cloud Cache vía Chat Privado)
+# ---------------------------------------------------------------------------
+_cloud_push_lock = asyncio.Lock()
+_last_cloud_push_time = 0.0
+_bot_events_registered = False
+
+
+async def push_cloud_cache_backup(manual: bool = False) -> dict:
+    """Envía una copia silenciosa de topics_cache.json al chat privado del usuario con el bot."""
+    global client, _last_cloud_push_time
+    if not client or not client.is_connected():
+        return {"ok": False, "error": "Bot de Telegram no conectado"}
+    if not CACHE_FILE.is_file():
+        return {"ok": False, "error": "No existe archivo de caché local"}
+
+    cfg = load_app_config()
+    owner_chat_id = cfg.get("owner_chat_id")
+    if not owner_chat_id:
+        return {"ok": False, "error": "Chat privado del usuario no vinculado. Abre tu bot en Telegram y envíale /start."}
+
+    now = time.time()
+    if not manual and (now - _last_cloud_push_time < 30):
+        return {"ok": True, "skipped": True, "message": "Respaldo omitido por debounce"}
+
+    async with _cloud_push_lock:
+        try:
+            cache_data = load_cache()
+            total_channels = len(cache_data)
+            total_videos = sum(len(e.get("videos", {})) for e in cache_data.values())
+            total_topics = sum(len(e.get("topics", {})) for e in cache_data.values())
+
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
+            host_name = os.environ.get("COMPUTERNAME", "TeleVault-Node")
+            caption = (
+                f"📦 #televault_cache · Respaldo en la nube\n"
+                f"🕒 Fecha: {ts_str}\n"
+                f"💻 Equipo: {host_name}\n"
+                f"📊 Canales: {total_channels} | Temas: {total_topics} | Vídeos: {total_videos}"
+            )
+            await client.send_file(
+                int(owner_chat_id),
+                str(CACHE_FILE),
+                caption=caption,
+                silent=True,
+                attributes=[types.DocumentAttributeFilename(file_name="topics_cache.json")]
+            )
+            _last_cloud_push_time = time.time()
+            cfg["last_cloud_backup_time"] = _last_cloud_push_time
+            save_app_config(cfg)
+            log.info("[CLOUD CACHE] Copia de topics_cache.json enviada en silencio a chat %s (canales=%d, vídeos=%d)",
+                     owner_chat_id, total_channels, total_videos)
+            return {
+                "ok": True,
+                "timestamp": _last_cloud_push_time,
+                "channels": total_channels,
+                "videos": total_videos,
+                "message": "Copia de seguridad subida a Telegram con éxito"
+            }
+        except Exception as e:
+            log.warning("[CLOUD CACHE] Error al enviar copia a Telegram: %s", public_error(e))
+            return {"ok": False, "error": public_error(e)}
+
+
+async def restore_cloud_cache_backup(manual: bool = False) -> dict:
+    """Busca en el chat privado del bot el último topics_cache.json y lo restaura si es más reciente o si es manual."""
+    global client
+    if not client or not client.is_connected():
+        return {"ok": False, "error": "Bot de Telegram no conectado"}
+
+    cfg = load_app_config()
+    owner_chat_id = cfg.get("owner_chat_id")
+    if not owner_chat_id:
+        return {"ok": False, "error": "Chat privado no vinculado"}
+
+    try:
+        target_msg = None
+        async for msg in client.iter_messages(int(owner_chat_id), limit=50):
+            if msg.file and (getattr(msg.file, "name", "") == "topics_cache.json" or (msg.text and "#televault_cache" in msg.text)):
+                target_msg = msg
+                break
+
+        if not target_msg:
+            return {"ok": False, "message": "No se encontró ninguna copia en la nube en el chat con el bot"}
+
+        remote_ts = target_msg.date.timestamp()
+        local_ts = CACHE_FILE.stat().st_mtime if CACHE_FILE.is_file() else 0.0
+
+        if not manual and remote_ts <= (local_ts + 5):
+            log.info("[CLOUD CACHE] La copia en la nube no es más reciente que la local (remota=%s, local=%s)",
+                     remote_ts, local_ts)
+            return {"ok": True, "restored": False, "message": "La caché local ya está actualizada"}
+
+        tmp_download = DATA_DIR / "topics_cache_cloud.tmp"
+        try:
+            await client.download_media(target_msg, file=str(tmp_download))
+            with open(tmp_download, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    raise ValueError("El archivo restaurado no tiene un formato válido")
+
+            os.replace(tmp_download, CACHE_FILE)
+            try:
+                os.utime(CACHE_FILE, (remote_ts, remote_ts))
+            except Exception:
+                pass
+
+            existing_channels = load_channels()
+            existing_ids = {c["id"] for c in existing_channels}
+            added_any = False
+            for k, v in data.items():
+                try:
+                    cid = int(k)
+                except ValueError:
+                    continue
+                if cid not in existing_ids:
+                    existing_channels.append({
+                        "id": cid,
+                        "title": v.get("title", f"Canal {cid}"),
+                        "forum": bool(v.get("forum", False)),
+                        "visible": True,
+                        "added_at": int(time.time())
+                    })
+                    existing_ids.add(cid)
+                    added_any = True
+            if added_any:
+                save_channels(existing_channels)
+
+            total_channels = len(data)
+            total_videos = sum(len(e.get("videos", {})) for e in data.values())
+            log.info("[CLOUD CACHE] Caché restaurada desde la nube con éxito (canales=%d, vídeos=%d)",
+                     total_channels, total_videos)
+            return {
+                "ok": True,
+                "restored": True,
+                "channels": total_channels,
+                "videos": total_videos,
+                "date": target_msg.date.strftime("%Y-%m-%d %H:%M:%S"),
+                "message": f"Caché restaurada correctamente ({total_channels} canales, {total_videos} vídeos)"
+            }
+        finally:
+            if tmp_download.is_file():
+                try:
+                    tmp_download.unlink()
+                except Exception:
+                    pass
+    except Exception as e:
+        log.warning("[CLOUD CACHE] Error al restaurar copia desde Telegram: %s", public_error(e))
+        return {"ok": False, "error": public_error(e)}
+
+
+def register_bot_events(cl: TelegramClient):
+    global _bot_events_registered
+    if not cl:
+        return
+    if _bot_events_registered:
+        return
+
+    @cl.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
+    async def _on_private_message(event):
+        try:
+            sender = await event.get_sender()
+            if not sender or getattr(sender, "bot", False):
+                return
+            sender_id = int(event.chat_id)
+            cfg = load_app_config()
+            old_owner = cfg.get("owner_chat_id")
+            if old_owner != sender_id:
+                cfg["owner_chat_id"] = sender_id
+                cfg["owner_username"] = getattr(sender, "username", "") or ""
+                cfg["owner_first_name"] = getattr(sender, "first_name", "") or ""
+                save_app_config(cfg)
+                log.info("[CLOUD CACHE] Chat privado vinculado con usuario ID=%s (@%s)", sender_id, cfg.get("owner_username"))
+
+            txt = (event.raw_text or "").strip()
+            cmd = txt.split()[0].lower() if txt else ""
+
+            if cmd in ("/start", "/help"):
+                first_name = getattr(sender, "first_name", "") or "Usuario"
+                resp = (
+                    f"👋 ¡Hola {first_name}! Tu TeleVault está vinculado a este chat privado.\n\n"
+                    "📦 A partir de ahora, tus canales y temas se respaldarán aquí de forma silenciosa "
+                    "para que puedas sincronizarlos en cualquier ordenador.\n\n"
+                    "Comandos disponibles:\n"
+                    "• /backup - Crear copia de seguridad ahora\n"
+                    "• /restore - Forzar restauración de copia\n"
+                    "• /status - Ver estado del servidor"
+                )
+                await event.reply(resp)
+                asyncio.create_task(push_cloud_cache_backup(manual=True))
+            elif cmd == "/backup":
+                await event.reply("⏳ Generando y subiendo copia de seguridad de la caché...")
+                res = await push_cloud_cache_backup(manual=True)
+                if res.get("ok"):
+                    await event.reply("✅ Copia de seguridad subida correctamente a este chat.")
+                else:
+                    await event.reply(f"❌ Error al subir copia: {res.get('error', 'desconocido')}")
+            elif cmd == "/restore":
+                await event.reply("⏳ Restaurando caché desde este chat...")
+                res = await restore_cloud_cache_backup(manual=True)
+                if res.get("ok"):
+                    await event.reply(f"✅ {res.get('message', 'Caché restaurada correctamente.')}")
+                    asyncio.create_task(run_refresh(rescan=False))
+                else:
+                    await event.reply(f"❌ Error al restaurar: {res.get('error', res.get('message', 'desconocido'))}")
+            elif cmd == "/status":
+                cache = load_cache()
+                vinfo = get_app_version_info()
+                ver = vinfo.get("version", "v3.3.2")
+                c_count = len(cache)
+                vid_count = sum(len(e.get("videos", {})) for e in cache.values())
+                await event.reply(
+                    f"🤖 **TeleVault {ver}**\n"
+                    f"📊 Canales en caché: {c_count}\n"
+                    f"🎬 Vídeos indexados: {vid_count}\n"
+                    f"💻 Host: {os.environ.get('COMPUTERNAME', 'Local')}\n"
+                    f"🟢 Servidor activo y conectado."
+                )
+        except Exception as e:
+            log.warning("[CLOUD CACHE] Error en mensaje privado entrante: %s", public_error(e))
+
+    _bot_events_registered = True
+    log.info("[CLOUD CACHE] Eventos de bot para chat privado registrados.")
+
+
 def _bot_api_token() -> str:
     cfg = load_app_config()
     token = (cfg.get("bot_token") or BOT_TOKEN or "").strip()
@@ -617,6 +849,14 @@ def bot_api_detect_chats() -> list:
 
                 if chat and chat.get("id"):
                     cid = int(chat["id"])
+                    if chat.get("type") == "private":
+                        cfg = load_app_config()
+                        if not cfg.get("owner_chat_id"):
+                            cfg["owner_chat_id"] = cid
+                            cfg["owner_username"] = chat.get("username", "")
+                            cfg["owner_first_name"] = chat.get("first_name", "")
+                            save_app_config(cfg)
+                            log.info("[CLOUD CACHE] Chat privado detectado automáticamente en getUpdates: %s", cid)
                     if cid not in seen and chat.get("type") in ("channel", "supergroup", "group"):
                         seen.add(cid)
                         # Consultar getChat en vivo para obtener SIEMPRE el título actual de Telegram
@@ -976,7 +1216,7 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
     videos = {k: list(v) for k, v in entry.get("videos", {}).items()}
     msg_scanned = entry.get("msg_scanned", 0)
 
-    if force_rescan or entry.get("scan_v") != SCAN_VERSION:
+    if entry.get("scan_v") != SCAN_VERSION:
         videos = {}
         msg_scanned = 0
 
@@ -991,16 +1231,18 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
         else:
             topics = {1: {"title": "General", "top": 0}}
 
-        # 2) Revalidar vídeos conocidos (borrados / caption editado)
-        known_ids = sorted(int(k) for k in videos)
-        for i in range(0, len(known_ids), SCAN_BATCH):
-            chunk = known_ids[i:i + SCAN_BATCH]
-            msgs = await get_messages_by_ids(entity, chunk)
-            for mid, m in zip(chunk, msgs):
-                if m and is_video(m):
-                    videos[str(mid)] = [raw_topic_of(m), video_name(m), video_size(m)]
-                else:
-                    videos.pop(str(mid), None)
+        # 2) Revalidar vídeos conocidos (solo en escaneo completo forzado / rescan manual)
+        if force_rescan and videos:
+            log.info("[SCAN] %s: revalidando %d vídeos conocidos para comprobar bajas o ediciones...", chat_key, len(videos))
+            known_ids = sorted(int(k) for k in videos)
+            for i in range(0, len(known_ids), SCAN_BATCH):
+                chunk = known_ids[i:i + SCAN_BATCH]
+                msgs = await get_messages_by_ids(entity, chunk)
+                for mid, m in zip(chunk, msgs):
+                    if m and is_video(m):
+                        videos[str(mid)] = [raw_topic_of(m), video_name(m), video_size(m)]
+                    else:
+                        videos.pop(str(mid), None)
 
         # 3) Mensajes nuevos: hasta el final real del canal
         new_topic_ids = set()
@@ -1010,9 +1252,10 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
         for _ in range(rounds):
             target = max((t["top"] for t in topics.values()), default=0)
             if target > scanned_to:
+                log.info("[SCAN] %s: escaneo incremental de mensajes nuevos %d..%d", chat_key, scanned_to + 1, target)
                 await scan_range(entity, chat_key, scanned_to + 1, target, videos, new_topic_ids)
                 scanned_to = target
-            if not tail_done:
+            if not tail_done and (not forum or target == 0 or force_rescan):
                 scanned_to = max(scanned_to, await scan_tail(entity, scanned_to + 1, videos, new_topic_ids))
                 tail_done = True
             missing = new_topic_ids - set(topics)
@@ -1037,8 +1280,8 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
                       "videos": videos})
 
         update_cache_entry(chat_key, commit)
-        log.info("[SYNC] %s: temas=%s, vídeos=%s, revisado hasta el mensaje %s",
-                 chat_key, len(names), len(videos), scanned_to)
+        log.info("[SYNC] %s: temas=%s, vídeos=%s, revisado hasta el mensaje %s (incremental=%s)",
+                 chat_key, len(names), len(videos), scanned_to, not force_rescan)
         return names, videos
 
     except Exception as e:
@@ -1195,6 +1438,10 @@ async def backfill_missing_video_sizes():
 async def refresh_all(rescan: bool = False) -> list:
     targets = get_target_channels(visible_only=True)
     results = await asyncio.gather(*[load_group(i, rescan) for i in targets])
+    # Si tenemos vinculado el chat del usuario, respaldar en Telegram Cloud silenciosamente
+    cfg = load_app_config()
+    if cfg.get("owner_chat_id"):
+        asyncio.create_task(push_cloud_cache_backup(manual=False))
     return [g for g in results if g and g.get("nombre", "").strip().lower() != "general"]
 
 
@@ -1375,6 +1622,9 @@ async def run_upload(key, path, size, name, chat_id, topic_id, file_id=None, ori
         sent = await upload_and_send(key, path, name, entity, topic_id, on_progress, state, original_name=original_name)
         try:
             cache_add_video(chat_id, sent.id, topic_id, name, size)   # aparece en la barra lateral
+            cfg = load_app_config()
+            if cfg.get("owner_chat_id"):
+                asyncio.create_task(push_cloud_cache_backup(manual=False))
         except Exception as e:
             log.warning("No se pudo registrar el vídeo en la caché: %s", public_error(e))
         if file_id:
@@ -1540,7 +1790,7 @@ def get_app_version_info() -> dict:
     # 3. Determinar la versión sin degradación:
     # Si VERSION tiene v3.3.1 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.3.1"
+    version = file_version or git_tag_version or "v3.4.0"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -1750,6 +2000,9 @@ async def set_bot_config(
 
     client = test_client
     bot_username = new_username
+    global _bot_events_registered
+    _bot_events_registered = False
+    register_bot_events(client)
 
     cfg["bot_token"] = token
     cfg["bot_username"] = new_username
@@ -2055,6 +2308,59 @@ async def delete_channel_api(channelId: str = Form(...), purgeCache: bool = Form
 
     log.info("Canal eliminado: id=%s (purge_cache=%s)", cid, purgeCache)
     return {"ok": True, "deleted_id": cid}
+
+
+# ---------------------------------------------------------------------------
+# RUTAS DE COPIA EN LA NUBE (TELEGRAM CLOUD CACHE) Y REESCANEO
+# ---------------------------------------------------------------------------
+@app.get("/api/cloud_cache/status")
+async def cloud_cache_status_api():
+    """Devuelve el estado de la sincronización silenciosa en la nube con el bot."""
+    cfg = load_app_config()
+    owner_chat_id = cfg.get("owner_chat_id")
+    local_mtime = CACHE_FILE.stat().st_mtime if CACHE_FILE.is_file() else None
+    cache = load_cache()
+    return {
+        "ok": True,
+        "bot_configured": bool(client and client.is_connected() and bot_username),
+        "bot_username": bot_username,
+        "linked": bool(owner_chat_id),
+        "owner_chat_id": owner_chat_id,
+        "owner_username": cfg.get("owner_username", ""),
+        "owner_first_name": cfg.get("owner_first_name", ""),
+        "local_cache_exists": CACHE_FILE.is_file(),
+        "local_cache_size": CACHE_FILE.stat().st_size if CACHE_FILE.is_file() else 0,
+        "local_cache_mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(local_mtime)) if local_mtime else None,
+        "last_backup_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cfg["last_cloud_backup_time"])) if cfg.get("last_cloud_backup_time") else None,
+        "channels_count": len(cache),
+        "videos_count": sum(len(e.get("videos", {})) for e in cache.values())
+    }
+
+
+@app.post("/api/cloud_cache/backup")
+async def cloud_cache_backup_api():
+    """Fuerza la subida de una copia de respaldo a Telegram Cloud de forma silenciosa."""
+    res = await push_cloud_cache_backup(manual=True)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Error al subir copia de respaldo"))
+    return res
+
+
+@app.post("/api/cloud_cache/restore")
+async def cloud_cache_restore_api():
+    """Fuerza la restauración de la copia de respaldo desde Telegram Cloud."""
+    res = await restore_cloud_cache_backup(manual=True)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", res.get("message", "Error al restaurar copia")))
+    asyncio.create_task(run_refresh(rescan=False))
+    return res
+
+
+@app.post("/api/channels/rescan")
+async def rescan_channels_api():
+    """Fuerza un reescaneo profundo y completo de todos los canales de Telegram."""
+    asyncio.create_task(run_refresh(rescan=True))
+    return {"ok": True, "message": "Reescaneo profundo iniciado"}
 
 
 @app.post("/api/create_topic")

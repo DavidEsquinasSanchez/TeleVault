@@ -433,6 +433,19 @@ body.resizing-sidebar * {
     transform: scale(0.95);
 }
 
+.btn-sidebar-icon.is-spinning svg,
+.btn-rescan-channels.is-spinning .btn-icon,
+.btn-channels-reload.is-spinning {
+    animation: icon-spin 0.9s linear infinite;
+    display: inline-block;
+}
+
+@keyframes icon-spin {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
 .sidebar-footer {
     padding: 10px 14px;
     border-top: 1px solid var(--border);
@@ -2420,6 +2433,124 @@ body.light-theme .destination-badge {
     margin-top: 8px;
 }
 
+/* Sincronización en la Nube y Reescanero */
+.channels-title-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-rescan-channels {
+    font-size: 0.78rem;
+    padding: 5px 10px;
+    background-color: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #93c5fd;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.btn-rescan-channels:hover {
+    background-color: rgba(59, 130, 246, 0.22);
+    border-color: var(--accent);
+    color: #ffffff;
+}
+
+.cloud-sync-card {
+    background-color: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cloud-sync-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.cloud-sync-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    margin: 0;
+}
+
+.cloud-sync-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+    margin: 0;
+}
+
+.cloud-sync-status {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.cloud-sync-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+.cloud-sync-actions .btn-channel-tool {
+    flex: 1;
+    justify-content: center;
+    font-size: 0.8rem;
+    padding: 7px 10px;
+}
+
+.cloud-sync-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 4px;
+}
+
+.cloud-sync-meta-item {
+    display: flex;
+    justify-content: space-between;
+}
+
+.btn-bot-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background-color: rgba(59, 130, 246, 0.16);
+    border: 1px solid var(--accent);
+    color: #93c5fd;
+    text-decoration: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin-top: 6px;
+    transition: all 0.2s;
+}
+
+.btn-bot-link:hover {
+    background-color: var(--accent);
+    color: #ffffff;
+}
+
 /* Clases de utilidad */
 .hidden {
     display: none !important;
@@ -4238,4 +4369,37 @@ body.light-theme .update-version-summary,
 body.light-theme .update-notes-content {
     background: #ffffff;
     border-color: #e2e8f0;
+}
+
+body.light-theme .cloud-sync-card {
+    background-color: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+body.light-theme .cloud-sync-status {
+    background-color: #ffffff;
+    border-color: #e2e8f0;
+    color: #334155;
+}
+
+body.light-theme .btn-rescan-channels {
+    background-color: #eff6ff;
+    border-color: #93c5fd;
+    color: #1d4ed8;
+}
+
+body.light-theme .btn-rescan-channels:hover {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
+body.light-theme .btn-bot-link {
+    background-color: #eff6ff;
+    border-color: #3b82f6;
+    color: #1d4ed8;
+}
+
+body.light-theme .btn-bot-link:hover {
+    background-color: #3b82f6;
+    color: #ffffff;
 }

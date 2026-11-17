@@ -145,9 +145,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     let downloadToDeleteId = null;
 
     // Elementos de Gestión de Canales
+    const btnRescanAll = document.getElementById('btnRescanAll');
     const btnManageChannels = document.getElementById('btnManageChannels');
     const channelsModal = document.getElementById('channelsModal');
     const btnCloseChannelsModal = document.getElementById('btnCloseChannelsModal');
+    const btnModalRescanChannels = document.getElementById('btnModalRescanChannels');
     const inputNewChannel = document.getElementById('inputNewChannel');
     const btnSubmitAddChannel = document.getElementById('btnSubmitAddChannel');
     const modalBotName = document.getElementById('modalBotName');
@@ -173,6 +175,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const botConfigFeedback = document.getElementById('botConfigFeedback');
     const btnSaveBotConfig = document.getElementById('btnSaveBotConfig');
     const btnCancelBotConfig = document.getElementById('btnCancelBotConfig');
+    const btnUploadCloudBackup = document.getElementById('btnUploadCloudBackup');
+    const btnRestoreCloudBackup = document.getElementById('btnRestoreCloudBackup');
     const channelSuggestionsDropdown = document.getElementById('channelSuggestionsDropdown');
     const btnDetectChannels = document.getElementById('btnDetectChannels');
     const btnToggleChannelHelp = document.getElementById('btnToggleChannelHelp');
@@ -535,6 +539,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    let wasScanning = false;
     async function checkHealth() {
         try {
             const h = await window.TelegramAPI.health();
@@ -564,15 +569,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (!h.configured) {
                 setConn('error', 'header.bot_not_configured', 'Sin configurar');
+                if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
+                if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
             } else if (!h.telegram) {
                 setConn('error', 'header.bot_error', 'Desconectado');
+                if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
+                if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
             } else if (h.scanning) {
-                setConn('busy', 'header.bot_checking', 'Actualizando…');
+                wasScanning = true;
+                setConn('busy', 'header.bot_syncing', 'Sincronizando…');
+                if (btnRescanAll) btnRescanAll.classList.add('is-spinning');
+                if (btnModalRescanChannels) btnModalRescanChannels.classList.add('is-spinning');
             } else {
+                if (wasScanning) {
+                    wasScanning = false;
+                    refreshSidebar();
+                }
                 setConn('ok', 'header.bot_connected', 'Conectado');
+                if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
+                if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
             }
         } catch (error) {
             setConn('error', error.status === 401 ? 'Sesión caducada' : 'Sin backend');
+            if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
+            if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
         }
     }
 
@@ -3515,6 +3535,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         botConfigModal.classList.add('hidden');
     }
 
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     async function loadBotConfigData() {
         try {
             const cfg = await window.TelegramAPI.getBotConfig();
@@ -3526,6 +3556,71 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         } catch (e) {
             // Ignorar
+        }
+        await renderCloudSyncStatus();
+    }
+
+    async function renderCloudSyncStatus() {
+        const block = document.getElementById('cloudSyncStatusBlock');
+        if (!block) return;
+
+        try {
+            const status = await window.TelegramAPI.getCloudCacheStatus();
+            const t = (k, def) => window.TeleVaultI18n ? window.TeleVaultI18n.t(k, def) : def;
+
+            if (!status.bot_configured) {
+                block.innerHTML = `
+                    <div style="color: var(--text-muted);">
+                        ${t('modals.bot.step1', 'Configura y conecta tu bot primero para activar la sincronización en la nube.')}
+                    </div>
+                `;
+                if (btnUploadCloudBackup) btnUploadCloudBackup.disabled = true;
+                if (btnRestoreCloudBackup) btnRestoreCloudBackup.disabled = true;
+                return;
+            }
+
+            if (btnUploadCloudBackup) btnUploadCloudBackup.disabled = false;
+            if (btnRestoreCloudBackup) btnRestoreCloudBackup.disabled = false;
+
+            let html = '';
+            if (status.linked) {
+                const ownerName = status.owner_username ? `@${status.owner_username}` : (status.owner_first_name || `ID ${status.owner_chat_id}`);
+                const sizeFmt = window.TelegramAPI.formatBytes ? window.TelegramAPI.formatBytes(status.local_cache_size) : `${status.local_cache_size} bytes`;
+                html += `
+                    <div style="color: #34d399; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <span>🟢</span>
+                        <span>${t('modals.bot.cloud_linked', 'Chat privado vinculado.')} (${escapeHtml(ownerName)})</span>
+                    </div>
+                    <div class="cloud-sync-meta">
+                        <div class="cloud-sync-meta-item">
+                            <span>${t('modals.bot.cloud_last_backup', 'Última copia en la nube:')}</span>
+                            <strong style="color: var(--text-main);">${status.last_backup_time || 'Aún no subida'}</strong>
+                        </div>
+                        <div class="cloud-sync-meta-item">
+                            <span>${t('modals.bot.cloud_local_cache', 'Caché local:')}</span>
+                            <strong style="color: var(--text-main);">${status.channels_count} canales · ${status.videos_count} vídeos (${sizeFmt})</strong>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const botUser = status.bot_username || 'tu_bot';
+                html += `
+                    <div style="color: #f59e0b; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <span>🟡</span>
+                        <span>${t('modals.bot.cloud_not_linked', 'Chat privado no vinculado todavía.')}</span>
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 0.78rem;">
+                        ${t('modals.bot.cloud_instructions', 'Para vincular tu chat y sincronizar entre varios equipos: abre una conversación con tu bot en Telegram y pulsa Iniciar o envíale cualquier mensaje.')}
+                    </div>
+                    <a href="https://t.me/${encodeURIComponent(botUser)}" target="_blank" rel="noopener noreferrer" class="btn-bot-link">
+                        <span>💬</span>
+                        <span>${t('modals.bot.btn_open_bot_chat', 'Abrir chat con el bot en Telegram')} (@${escapeHtml(botUser)})</span>
+                    </a>
+                `;
+            }
+            block.innerHTML = html;
+        } catch (e) {
+            block.innerHTML = `<div style="color: #f87171;">Error al consultar estado de la nube: ${escapeHtml(e.message)}</div>`;
         }
     }
 
@@ -3580,6 +3675,64 @@ document.addEventListener('DOMContentLoaded', async () => {
             inputBotToken.type = inputBotToken.type === 'password' ? 'text' : 'password';
             btnToggleBotTokenVis.innerHTML = inputBotToken.type === 'password' ? SVG.eye : SVG.eyeOff;
         });
+    }
+
+    if (btnUploadCloudBackup) {
+        btnUploadCloudBackup.addEventListener('click', async () => {
+            btnUploadCloudBackup.disabled = true;
+            showBotFeedback('Subiendo copia de seguridad silenciosa a Telegram...', 'info');
+            try {
+                await window.TelegramAPI.backupCloudCache();
+                const t = (k, def) => window.TeleVaultI18n ? window.TeleVaultI18n.t(k, def) : def;
+                showBotFeedback(t('modals.bot.cloud_backup_success', 'Copia de seguridad subida a Telegram con éxito.'), 'success');
+                renderCloudSyncStatus();
+            } catch (err) {
+                showBotFeedback(`Error al subir copia: ${err.message}`, 'error');
+            } finally {
+                btnUploadCloudBackup.disabled = false;
+            }
+        });
+    }
+
+    if (btnRestoreCloudBackup) {
+        btnRestoreCloudBackup.addEventListener('click', async () => {
+            btnRestoreCloudBackup.disabled = true;
+            showBotFeedback('Restaurando copia desde Telegram...', 'info');
+            try {
+                const res = await window.TelegramAPI.restoreCloudCache();
+                const t = (k, def) => window.TeleVaultI18n ? window.TeleVaultI18n.t(k, def) : def;
+                showBotFeedback(res.message || t('modals.bot.cloud_restore_success', 'Caché restaurada desde Telegram con éxito.'), 'success');
+                renderCloudSyncStatus();
+                refreshSidebar();
+            } catch (err) {
+                showBotFeedback(`Error al restaurar copia: ${err.message}`, 'error');
+            } finally {
+                btnRestoreCloudBackup.disabled = false;
+            }
+        });
+    }
+
+    async function handleRescanAll() {
+        const t = (k, def) => window.TeleVaultI18n ? window.TeleVaultI18n.t(k, def) : def;
+        addLog(t('modals.bot.rescan_started', 'Actualización masiva iniciada. Sincronizando todos los canales...'), 'info');
+        if (btnRescanAll) btnRescanAll.classList.add('is-spinning');
+        if (btnModalRescanChannels) btnModalRescanChannels.classList.add('is-spinning');
+
+        try {
+            await window.TelegramAPI.rescanChannels();
+            checkHealth();
+        } catch (err) {
+            addLog(`Error al iniciar reescaneo: ${err.message}`, 'error');
+            if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
+            if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
+        }
+    }
+
+    if (btnRescanAll) {
+        btnRescanAll.addEventListener('click', handleRescanAll);
+    }
+    if (btnModalRescanChannels) {
+        btnModalRescanChannels.addEventListener('click', handleRescanAll);
     }
 
     if (btnManageChannels) btnManageChannels.addEventListener('click', () => openChannelsModal(false));

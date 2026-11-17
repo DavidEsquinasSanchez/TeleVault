@@ -61,6 +61,9 @@
                 <div class="sidebar-header">
                     <span class="sidebar-title" data-i18n="sidebar.title">Canales</span>
                     <div class="sidebar-header-actions">
+                        <button type="button" id="btnRescanAll" class="btn-sidebar-icon" title="Actualización masiva / Reescanear todo" data-i18n-title="sidebar.rescan_all_title" aria-label="Actualización masiva" data-i18n-aria-label="sidebar.rescan_all_title">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                        </button>
                         <button type="button" id="btnManageChannels" class="btn-sidebar-icon" title="Gestionar canales" data-i18n-title="sidebar.manage_title" aria-label="Gestionar canales" data-i18n-aria-label="sidebar.manage_title">
                             <svg class="icon-svg" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
@@ -479,7 +482,12 @@
                 <!-- Lista de Canales -->
                 <div class="channels-section-title">
                     <h4><span data-i18n="modals.channels.registered_title">Canales registrados</span> (<span id="channelsCount">0</span>)</h4>
-                    <button type="button" id="btnRefreshChannelsList" class="btn-channels-reload" title="Actualizar lista" data-i18n-title="modals.channels.btn_refresh_title">🔄</button>
+                    <div class="channels-title-actions">
+                        <button type="button" id="btnModalRescanChannels" class="btn-channel-tool btn-rescan-channels" title="Forzar un reescaneo completo y profundo de todos los canales" data-i18n-title="modals.channels.btn_rescan_title">
+                            <span class="btn-icon">⚡</span> <span class="btn-text" data-i18n="modals.channels.btn_rescan">Reescanear todo</span>
+                        </button>
+                        <button type="button" id="btnRefreshChannelsList" class="btn-channels-reload" title="Actualizar lista" data-i18n-title="modals.channels.btn_refresh_title">🔄</button>
+                    </div>
                 </div>
 
                 <div id="channelsListContainer" class="channels-list">
@@ -547,6 +555,27 @@
                         </div>
                     </div>
                 </details>
+
+                <!-- Sección de Sincronización en la Nube (Telegram Cloud Cache) -->
+                <div class="cloud-sync-card">
+                    <div class="cloud-sync-header">
+                        <h4 class="cloud-sync-title" data-i18n="modals.bot.cloud_sync_title">☁️ Sincronización en la Nube (Telegram Cloud)</h4>
+                    </div>
+                    <p class="cloud-sync-desc" data-i18n="modals.bot.cloud_sync_desc">
+                        Sincroniza tu caché de temas y canales en silencio a través de tu chat privado con el bot, permitiendo usar TeleVault en varios ordenadores sin esperas.
+                    </p>
+                    <div id="cloudSyncStatusBlock" class="cloud-sync-status">
+                        <!-- Inyectado dinámicamente por JS -->
+                    </div>
+                    <div class="cloud-sync-actions">
+                        <button type="button" id="btnUploadCloudBackup" class="btn-channel-tool" data-i18n-title="modals.bot.btn_cloud_backup">
+                            <span class="btn-icon">📤</span> <span class="btn-text" data-i18n="modals.bot.btn_cloud_backup">Subir copia a la nube</span>
+                        </button>
+                        <button type="button" id="btnRestoreCloudBackup" class="btn-channel-tool" data-i18n-title="modals.bot.btn_cloud_restore">
+                            <span class="btn-icon">📥</span> <span class="btn-text" data-i18n="modals.bot.btn_cloud_restore">Restaurar copia</span>
+                        </button>
+                    </div>
+                </div>
 
                 <div id="botConfigFeedback" class="channel-feedback hidden"></div>
 

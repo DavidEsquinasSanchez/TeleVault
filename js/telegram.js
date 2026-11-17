@@ -110,6 +110,30 @@ const TelegramAPI = {
         return await response.json();
     },
 
+    async rescanChannels() {
+        const response = await apiFetch('/channels/rescan', { method: 'POST' });
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json();
+    },
+
+    async getCloudCacheStatus() {
+        const response = await apiFetch('/cloud_cache/status');
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json();
+    },
+
+    async backupCloudCache() {
+        const response = await apiFetch('/cloud_cache/backup', { method: 'POST' });
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json();
+    },
+
+    async restoreCloudCache() {
+        const response = await apiFetch('/cloud_cache/restore', { method: 'POST' });
+        if (!response.ok) throw new Error(await readError(response));
+        return await response.json();
+    },
+
     // soloCache = true: respuesta instantánea con lo guardado; false: espera al escaneo de Telegram
     async getGrupos(soloCache = false) {
         if (!soloCache) addLog("Actualizando grupos, temas y vídeos desde Telegram...", "info");

@@ -652,8 +652,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Pinta los datos y conserva lo que el usuario tenía seleccionado en el formulario
     function applyGroupsData(data) {
-        // Filtrar grupo "General" por si existiese
-        telegramData = (data || []).filter(g => g.nombre && g.nombre.trim().toLowerCase() !== 'general');
+        // Filtrar grupo "General" por si existiese y ordenar canales de forma natural
+        telegramData = (data || [])
+            .filter(g => g.nombre && g.nombre.trim().toLowerCase() !== 'general')
+            .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
         renderSidebar();
 
         const prevCat = categoriaSelect.value;
@@ -750,10 +752,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
 
-            // Filtrar temas para no mostrar "General" ni id 1
-            const temasFiltrados = (grupo.temas || []).filter(
-                t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general'
-            );
+            // Filtrar temas para no mostrar "General" ni id 1 y ordenar de forma natural
+            const temasFiltrados = (grupo.temas || [])
+                .filter(t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general')
+                .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
 
             if (grupo.tieneTemas && temasFiltrados.length > 0) {
                 const sublist = document.createElement('ul');
@@ -1041,10 +1043,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeSubcategoriaDropdown();
             return;
         }
-        // Filtrar temas para no mostrar ni permitir elegir "General"
-        const temasFiltrados = (grupo.temas || []).filter(
-            t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general'
-        );
+        // Filtrar temas para no mostrar ni permitir elegir "General" y ordenar de forma natural
+        const temasFiltrados = (grupo.temas || [])
+            .filter(t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general')
+            .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
         currentComboboxTopics = temasFiltrados.map(t => ({ id: String(t.id), nombre: t.nombre }));
         temasFiltrados.forEach(tema => {
             const opt = document.createElement('option');
@@ -1297,6 +1299,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const grupoNuevo = telegramData.find(g => g.id === categoryId);
                 if (grupoNuevo && !grupoNuevo.temas.some(t => t.id === result.topic.id)) {
                     grupoNuevo.temas.push({ id: result.topic.id, nombre: result.topic.nombre, videos: [] });
+                    grupoNuevo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
                 }
                 expandedChannels.add(categoryId);
                 renderSidebar();
@@ -3384,7 +3387,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (modalBotName && data.bot) {
                 modalBotName.textContent = `@${data.bot}`;
             }
-            const channels = data.channels || [];
+            const channels = (data.channels || []).slice().sort((a, b) => naturalCompare(a.title || '', b.title || ''));
             if (channelsCount) channelsCount.textContent = channels.length;
 
             if (channels.length === 0) {

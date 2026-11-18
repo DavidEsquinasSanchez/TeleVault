@@ -624,24 +624,30 @@ def init_channels_file():
     save_channels(channels)
 
 
+def natural_sort_key(s: str):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", str(s or ""))]
+
+
 def load_channels() -> list:
-    """Devuelve la lista de diccionarios de canales desde channels.json."""
+    """Devuelve la lista de diccionarios de canales desde channels.json ordenada de forma natural."""
     if not CHANNELS_FILE.is_file():
         init_channels_file()
     try:
         with open(CHANNELS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data.get("channels", [])
+            channels = data.get("channels", [])
+            return sorted(channels, key=lambda c: natural_sort_key(c.get("title", "")))
     except Exception as e:
         log.warning("No se pudo leer %s: %s", CHANNELS_FILE, public_error(e))
         return []
 
 
 def save_channels(channels: list) -> None:
-    """Guarda de forma atómica la lista de canales en channels.json."""
+    """Guarda de forma atómica la lista de canales en channels.json (ordenada de forma natural por título)."""
+    sorted_channels = sorted(channels, key=lambda c: natural_sort_key(c.get("title", "")))
     tmp = CHANNELS_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "channels": channels}, f, ensure_ascii=False, indent=2)
+        json.dump({"version": 1, "channels": sorted_channels}, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CHANNELS_FILE)
 
 
@@ -1383,10 +1389,6 @@ async def sync_channel(entity, chat_key: str, force_rescan: bool = False, title:
 # ---------------------------------------------------------------------------
 # GRUPOS (lo que pinta la barra lateral)
 # ---------------------------------------------------------------------------
-def natural_sort_key(s: str):
-    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", str(s or ""))]
-
-
 def assemble_group(identifier, title, forum, topics, videos) -> dict:
     topics_list = []
     direct_videos = []
@@ -1408,7 +1410,7 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
                 "videos": sorted(by_topic.get(tid, []), key=natural_sort_key),
                 "video_sizes": topic_sizes.get(tid, {})
             }
-            for tid, tname in sorted(topics.items(), key=lambda kv: kv[1].lower())
+            for tid, tname in sorted(topics.items(), key=lambda kv: natural_sort_key(kv[1]))
             if str(tid) != "1" and tname.strip().lower() != "general"
         ]
     else:
@@ -1532,7 +1534,8 @@ async def refresh_all(rescan: bool = False) -> list:
     cfg = load_app_config()
     if cfg.get("owner_chat_id"):
         asyncio.create_task(push_cloud_cache_backup(manual=False))
-    return [g for g in results if g and g.get("nombre", "").strip().lower() != "general"]
+    filtered = [g for g in results if g and g.get("nombre", "").strip().lower() != "general"]
+    return sorted(filtered, key=lambda g: natural_sort_key(g.get("nombre", "")))
 
 
 async def run_refresh(rescan: bool = False) -> list:
@@ -1878,9 +1881,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.3.1 y Git tiene una etiqueta anterior, NUNCA degradar.
+    # Si VERSION tiene v3.4.1 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.4.0"
+    version = file_version or git_tag_version or "v3.4.1"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -2118,7 +2121,8 @@ async def get_groups(rescan: bool = False, scan: bool = True):
     if not scan:
         targets = get_target_channels(visible_only=True)
         groups = await asyncio.gather(*[group_from_cache(i) for i in targets])
-        return [g for g in groups if g and g.get("nombre", "").strip().lower() != "general"]
+        filtered = [g for g in groups if g and g.get("nombre", "").strip().lower() != "general"]
+        return sorted(filtered, key=lambda g: natural_sort_key(g.get("nombre", "")))
     return await run_refresh(rescan)
 
 

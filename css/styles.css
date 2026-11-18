@@ -595,6 +595,158 @@ body.resizing-sidebar * {
     color: var(--border);
 }
 
+/* Modo Organización y Reordenación del Sidebar */
+.btn-sidebar-icon.active {
+    background-color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+}
+
+.btn-sidebar-reset {
+    color: #f59e0b;
+}
+
+.btn-sidebar-reset:hover {
+    background-color: rgba(245, 158, 11, 0.15) !important;
+    border-color: #f59e0b !important;
+    color: #fbbf24 !important;
+}
+
+.sidebar.reorder-mode {
+    outline: 2px dashed rgba(59, 130, 246, 0.35);
+    outline-offset: -2px;
+}
+
+.folder-drag-handle,
+.subfolder-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    color: var(--text-muted);
+    cursor: grab;
+    user-select: none;
+    padding: 0 4px;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+.folder-drag-handle:hover,
+.subfolder-drag-handle:hover {
+    opacity: 1;
+    color: var(--accent);
+}
+
+.folder-drag-handle:active,
+.subfolder-drag-handle:active {
+    cursor: grabbing;
+}
+
+.folder-order-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+.subfolder-order-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.btn-sort-toggle {
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+    line-height: 1.2;
+}
+
+.btn-sort-toggle:hover {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: #ffffff;
+}
+
+.btn-move-arrow {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 0;
+    line-height: 1;
+}
+
+.btn-move-arrow:hover:not(:disabled) {
+    background-color: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+}
+
+.btn-move-arrow:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+    border-color: transparent;
+}
+
+.folder-item.dragging,
+.subfolder-item.dragging {
+    opacity: 0.35 !important;
+    background-color: rgba(59, 130, 246, 0.12) !important;
+    border-radius: 4px;
+}
+
+.folder-item.drag-over-top,
+.subfolder-item.drag-over-top {
+    border-top: 2px solid var(--accent) !important;
+}
+
+.folder-item.drag-over-bottom,
+.subfolder-item.drag-over-bottom {
+    border-bottom: 2px solid var(--accent) !important;
+}
+
+body.light-theme .btn-sort-toggle {
+    background-color: #e2e8f0;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-theme .btn-sort-toggle:hover {
+    background-color: var(--accent);
+    color: #ffffff;
+}
+
+body.light-theme .btn-move-arrow {
+    background-color: #ffffff;
+    border-color: #cbd5e1;
+    color: #475569;
+}
+
+body.light-theme .btn-move-arrow:hover:not(:disabled) {
+    background-color: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+}
+
 /* Contenido Principal */
 .main-content {
     flex: 1;

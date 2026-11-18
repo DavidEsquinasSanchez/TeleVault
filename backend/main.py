@@ -98,6 +98,7 @@ FRONTEND_DIR = Path(os.getenv("NIGRO_FRONTEND_DIR", BASE_DIR.parent))
 LOG_DIR = DATA_DIR / "logs"
 CACHE_FILE = DATA_DIR / "topics_cache.json"
 CHANNELS_FILE = DATA_DIR / "channels.json"
+SIDEBAR_ORDER_FILE = DATA_DIR / "sidebar_order.json"
 CONFIG_FILE = DATA_DIR / "config.json"
 SESSION_PATH = str(DATA_DIR / SESSION_NAME)
 TEMP_DIR = DATA_DIR / "temp_uploads"
@@ -628,14 +629,64 @@ def natural_sort_key(s: str):
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", str(s or ""))]
 
 
+def load_sidebar_order() -> dict:
+    """Devuelve la configuración de orden manual de canales y temas."""
+    if not SIDEBAR_ORDER_FILE.is_file():
+        return {"channels": [], "topics": {}, "video_sort": {}}
+    try:
+        with open(SIDEBAR_ORDER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {
+                "channels": [str(c) for c in data.get("channels", [])],
+                "topics": {str(k): [str(t) for t in v] for k, v in data.get("topics", {}).items()},
+                "video_sort": {str(k): str(v) for k, v in data.get("video_sort", {}).items()}
+            }
+    except Exception as e:
+        log.warning("No se pudo leer %s: %s", SIDEBAR_ORDER_FILE, public_error(e))
+        return {"channels": [], "topics": {}, "video_sort": {}}
+
+
+def save_sidebar_order(order_data: dict) -> None:
+    """Guarda de forma atómica el orden manual de canales y temas en sidebar_order.json."""
+    tmp = SIDEBAR_ORDER_FILE.with_suffix(".tmp")
+    payload = {
+        "version": 1,
+        "channels": [str(c) for c in order_data.get("channels", [])],
+        "topics": {str(k): [str(t) for t in v] for k, v in order_data.get("topics", {}).items()},
+        "video_sort": {str(k): str(v) for k, v in order_data.get("video_sort", {}).items()},
+        "updated_at": int(time.time())
+    }
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SIDEBAR_ORDER_FILE)
+
+
+def clear_sidebar_order() -> None:
+    """Elimina sidebar_order.json para restablecer el orden alfabético por defecto."""
+    try:
+        if SIDEBAR_ORDER_FILE.is_file():
+            SIDEBAR_ORDER_FILE.unlink()
+    except Exception as e:
+        log.warning("No se pudo eliminar %s: %s", SIDEBAR_ORDER_FILE, public_error(e))
+
+
 def load_channels() -> list:
-    """Devuelve la lista de diccionarios de canales desde channels.json ordenada de forma natural."""
+    """Devuelve la lista de diccionarios de canales desde channels.json respetando orden manual si existe."""
     if not CHANNELS_FILE.is_file():
         init_channels_file()
     try:
         with open(CHANNELS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             channels = data.get("channels", [])
+            order_cfg = load_sidebar_order()
+            custom_order = order_cfg.get("channels", [])
+            if custom_order:
+                order_map = {str(cid): idx for idx, cid in enumerate(custom_order)}
+                max_idx = len(custom_order)
+                return sorted(
+                    channels,
+                    key=lambda c: (order_map.get(str(c.get("id")), max_idx), natural_sort_key(c.get("title", "")))
+                )
             return sorted(channels, key=lambda c: natural_sort_key(c.get("title", "")))
     except Exception as e:
         log.warning("No se pudo leer %s: %s", CHANNELS_FILE, public_error(e))
@@ -643,11 +694,10 @@ def load_channels() -> list:
 
 
 def save_channels(channels: list) -> None:
-    """Guarda de forma atómica la lista de canales en channels.json (ordenada de forma natural por título)."""
-    sorted_channels = sorted(channels, key=lambda c: natural_sort_key(c.get("title", "")))
+    """Guarda de forma atómica la lista de canales en channels.json."""
     tmp = CHANNELS_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "channels": sorted_channels}, f, ensure_ascii=False, indent=2)
+        json.dump({"version": 1, "channels": channels}, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CHANNELS_FILE)
 
 
@@ -1393,6 +1443,10 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
     topics_list = []
     direct_videos = []
     direct_sizes = {}
+    order_cfg = load_sidebar_order()
+    custom_topics = order_cfg.get("topics", {}).get(str(identifier), [])
+    video_sort_dir = order_cfg.get("video_sort", {}).get(str(identifier), "asc")
+
     if forum:
         by_topic = {}
         topic_sizes = {}
@@ -1403,6 +1457,22 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
             key = tid if tid in topics else 1
             by_topic.setdefault(key, []).append(name)
             topic_sizes.setdefault(key, {})[name] = size
+
+        filtered_topics = [
+            (tid, tname) for tid, tname in topics.items()
+            if str(tid) != "1" and tname.strip().lower() != "general"
+        ]
+
+        if custom_topics:
+            t_order_map = {str(tid): idx for idx, tid in enumerate(custom_topics)}
+            max_t_idx = len(custom_topics)
+            sorted_topics_tuples = sorted(
+                filtered_topics,
+                key=lambda kv: (t_order_map.get(str(kv[0]), max_t_idx), natural_sort_key(kv[1]))
+            )
+        else:
+            sorted_topics_tuples = sorted(filtered_topics, key=lambda kv: natural_sort_key(kv[1]))
+
         topics_list = [
             {
                 "id": str(tid),
@@ -1410,19 +1480,22 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
                 "videos": sorted(by_topic.get(tid, []), key=natural_sort_key),
                 "video_sizes": topic_sizes.get(tid, {})
             }
-            for tid, tname in sorted(topics.items(), key=lambda kv: natural_sort_key(kv[1]))
-            if str(tid) != "1" and tname.strip().lower() != "general"
+            for tid, tname in sorted_topics_tuples
         ]
     else:
         direct_videos = sorted([item[1] for item in videos.values()], key=natural_sort_key)
+        if video_sort_dir == "desc":
+            direct_videos.reverse()
         direct_sizes = {item[1]: (item[2] if len(item) > 2 else 0) for item in videos.values()}
+
     return {
         "id": str(identifier),
         "nombre": title,
         "tieneTemas": bool(forum),
         "temas": topics_list,
         "videos": direct_videos,
-        "video_sizes": direct_sizes
+        "video_sizes": direct_sizes,
+        "sort_dir": video_sort_dir
     }
 
 
@@ -1535,7 +1608,7 @@ async def refresh_all(rescan: bool = False) -> list:
     if cfg.get("owner_chat_id"):
         asyncio.create_task(push_cloud_cache_backup(manual=False))
     filtered = [g for g in results if g and g.get("nombre", "").strip().lower() != "general"]
-    return sorted(filtered, key=lambda g: natural_sort_key(g.get("nombre", "")))
+    return filtered
 
 
 async def run_refresh(rescan: bool = False) -> list:
@@ -1881,9 +1954,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.4.1 y Git tiene una etiqueta anterior, NUNCA degradar.
+    # Si VERSION tiene v3.5.0 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.4.1"
+    version = file_version or git_tag_version or "v3.5.0"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -2122,7 +2195,7 @@ async def get_groups(rescan: bool = False, scan: bool = True):
         targets = get_target_channels(visible_only=True)
         groups = await asyncio.gather(*[group_from_cache(i) for i in targets])
         filtered = [g for g in groups if g and g.get("nombre", "").strip().lower() != "general"]
-        return sorted(filtered, key=lambda g: natural_sort_key(g.get("nombre", "")))
+        return filtered
     return await run_refresh(rescan)
 
 
@@ -2223,6 +2296,36 @@ async def get_channels_api(refresh: bool = False):
         "bot": bot_username,
         "channels": channels
     }
+
+
+@app.get("/api/sidebar/order")
+async def get_sidebar_order_api():
+    """Devuelve la configuración actual de orden personalizado."""
+    return {
+        "ok": True,
+        "order": load_sidebar_order()
+    }
+
+
+@app.post("/api/sidebar/order")
+async def save_sidebar_order_api(request: Request):
+    """Guarda la configuración de orden personalizado de canales y temas."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Formato JSON inválido")
+
+    save_sidebar_order(body)
+    log.info("Orden manual de canales y temas guardado.")
+    return {"ok": True, "message": "Orden guardado correctamente"}
+
+
+@app.post("/api/sidebar/order/reset")
+async def reset_sidebar_order_api():
+    """Restablece el orden de canales y temas al orden alfabético/natural por defecto."""
+    clear_sidebar_order()
+    log.info("Orden manual de canales y temas restablecido a valores por defecto.")
+    return {"ok": True, "message": "Orden restablecido alfabéticamente"}
 
 
 @app.get("/api/channels/known")

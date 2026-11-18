@@ -235,6 +235,42 @@ const TelegramAPI = {
         return data.folder || '';
     },
 
+    // Obtiene la configuración de orden personalizado del sidebar
+    async getSidebarOrder() {
+        try {
+            const res = await apiFetch('/sidebar/order');
+            if (res.ok) {
+                const data = await res.json();
+                return data.order || { channels: [], topics: {}, video_sort: {} };
+            }
+        } catch (_) {}
+        return null;
+    },
+
+    // Guarda la configuración de orden personalizado del sidebar
+    async saveSidebarOrder(orderData) {
+        try {
+            const res = await apiFetch('/sidebar/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(orderData)
+            });
+            return res.ok;
+        } catch (_) {
+            return false;
+        }
+    },
+
+    // Restablece el orden personalizado alfabético por defecto
+    async resetSidebarOrder() {
+        try {
+            const res = await apiFetch('/sidebar/order/reset', { method: 'POST' });
+            return res.ok;
+        } catch (_) {
+            return false;
+        }
+    },
+
     // Inicia una descarga en el backend (por lote estructurado o por vídeo/tema específico)
     async startDownload(arg1, topicId, videoName, destFolder) {
         const formData = new FormData();

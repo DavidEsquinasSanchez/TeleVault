@@ -29,6 +29,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentSortAsc = true;
     let uploading = false;
     let cancelRequested = false;
+    let isReorderMode = false;
+    let draggedItem = null;
     const expandedTopics = new Set(); // temas desplegados en la barra lateral (clave: grupo:tema)
     const expandedChannels = new Set(); // canales expandidos (por defecto todos comprimidos)
 
@@ -38,6 +40,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         moon: '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
         chevronLeft: '<svg class="icon-svg" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>',
         chevronRight: '<svg class="icon-svg" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>',
+        chevronUp: '<svg class="icon-svg" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>',
+        chevronDown: '<svg class="icon-svg" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>',
+        arrowUpDown: '<svg class="icon-svg" viewBox="0 0 24 24"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>',
+        saveDisk: '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>',
         pencil: '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>',
         trash: '<svg class="icon-svg" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>',
         check: '<svg class="icon-svg" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>',
@@ -144,7 +150,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnCancelDeleteOkDownloads = document.getElementById('btnCancelDeleteOkDownloads');
     let downloadToDeleteId = null;
 
-    // Elementos de Gestión de Canales
+    // Elementos de Gestión de Canales y Reordenación
+    const btnReorderSidebar = document.getElementById('btnReorderSidebar');
+    const btnResetSidebarOrder = document.getElementById('btnResetSidebarOrder');
     const btnRescanAll = document.getElementById('btnRescanAll');
     const btnManageChannels = document.getElementById('btnManageChannels');
     const channelsModal = document.getElementById('channelsModal');
@@ -629,6 +637,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Ignorar error inicial
         }
 
+        // Sincronizar orden personalizado de canales y temas desde backend si no está en localStorage
+        try {
+            const serverOrder = await window.TelegramAPI.getSidebarOrder();
+            if (serverOrder && Array.isArray(serverOrder.channels) && serverOrder.channels.length > 0) {
+                localStorage.setItem('televault_sidebar_order', JSON.stringify(serverOrder));
+            }
+        } catch (_) {}
+
         // 1) Al instante, con lo que el backend tiene guardado
         let hasCached = false;
         try {
@@ -650,12 +666,156 @@ document.addEventListener('DOMContentLoaded', async () => {
         checkHealth();
     }
 
+    function getStoredSidebarOrder() {
+        try {
+            const raw = localStorage.getItem('televault_sidebar_order');
+            if (raw) return JSON.parse(raw);
+        } catch (_) {}
+        return null;
+    }
+
+    function applySidebarOrdering(data) {
+        let list = (data || []).filter(g => g.nombre && g.nombre.trim().toLowerCase() !== 'general');
+        const order = getStoredSidebarOrder();
+        if (order && Array.isArray(order.channels) && order.channels.length > 0) {
+            const chMap = new Map(order.channels.map((id, idx) => [String(id), idx]));
+            const maxIdx = order.channels.length;
+            list.sort((a, b) => {
+                const idxA = chMap.has(String(a.id)) ? chMap.get(String(a.id)) : maxIdx;
+                const idxB = chMap.has(String(b.id)) ? chMap.get(String(b.id)) : maxIdx;
+                if (idxA !== idxB) return idxA - idxB;
+                return naturalCompare(a.nombre || '', b.nombre || '');
+            });
+        }
+        list.forEach(grupo => {
+            if (order && order.video_sort && order.video_sort[String(grupo.id)]) {
+                grupo.sort_dir = order.video_sort[String(grupo.id)];
+            } else if (!grupo.sort_dir) {
+                grupo.sort_dir = 'asc';
+            }
+            if (grupo.tieneTemas && grupo.temas) {
+                const topicOrder = order && order.topics ? order.topics[String(grupo.id)] : null;
+                if (Array.isArray(topicOrder) && topicOrder.length > 0) {
+                    const tMap = new Map(topicOrder.map((id, idx) => [String(id), idx]));
+                    const maxTIdx = topicOrder.length;
+                    grupo.temas.sort((a, b) => {
+                        const idxA = tMap.has(String(a.id)) ? tMap.get(String(a.id)) : maxTIdx;
+                        const idxB = tMap.has(String(b.id)) ? tMap.get(String(b.id)) : maxTIdx;
+                        if (idxA !== idxB) return idxA - idxB;
+                        return naturalCompare(a.nombre || '', b.nombre || '');
+                    });
+                }
+            }
+        });
+        return list;
+    }
+
+    function moveGroup(fromIdx, dir) {
+        const toIdx = fromIdx + dir;
+        if (toIdx < 0 || toIdx >= telegramData.length) return;
+        const item = telegramData.splice(fromIdx, 1)[0];
+        telegramData.splice(toIdx, 0, item);
+        renderSidebar();
+        renderCategoriaOptions();
+    }
+
+    function moveTopic(groupId, fromIdx, dir) {
+        const grupo = telegramData.find(g => String(g.id) === String(groupId));
+        if (!grupo || !grupo.temas) return;
+        const toIdx = fromIdx + dir;
+        if (toIdx < 0 || toIdx >= grupo.temas.length) return;
+        const item = grupo.temas.splice(fromIdx, 1)[0];
+        grupo.temas.splice(toIdx, 0, item);
+        renderSidebar();
+        if (categoriaSelect.value === String(groupId)) {
+            populateSubcategorias(grupo);
+        }
+    }
+
+    function toggleGroupSort(groupId) {
+        const grupo = telegramData.find(g => String(g.id) === String(groupId));
+        if (!grupo) return;
+        const nextDir = (grupo.sort_dir === 'desc') ? 'asc' : 'desc';
+        grupo.sort_dir = nextDir;
+        if (grupo.tieneTemas && grupo.temas) {
+            if (nextDir === 'desc') {
+                grupo.temas.sort((a, b) => naturalCompare(b.nombre || '', a.nombre || ''));
+            } else {
+                grupo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+            }
+            if (categoriaSelect.value === String(groupId)) {
+                populateSubcategorias(grupo);
+            }
+        } else if (!grupo.tieneTemas && grupo.videos) {
+            if (nextDir === 'desc') {
+                grupo.videos.sort((a, b) => compareTransformedTitles(b, a));
+            } else {
+                grupo.videos.sort(compareTransformedTitles);
+            }
+        }
+        renderSidebar();
+    }
+
+    async function toggleReorderMode() {
+        if (!isReorderMode) {
+            isReorderMode = true;
+            renderSidebar();
+        } else {
+            isReorderMode = false;
+            renderSidebar();
+            await saveCurrentSidebarOrder();
+        }
+    }
+
+    async function saveCurrentSidebarOrder() {
+        const orderData = {
+            channels: telegramData.map(g => String(g.id)),
+            topics: {},
+            video_sort: {}
+        };
+        telegramData.forEach(g => {
+            if (g.tieneTemas && g.temas) {
+                orderData.topics[String(g.id)] = g.temas.map(t => String(t.id));
+            }
+            if (g.sort_dir) {
+                orderData.video_sort[String(g.id)] = g.sort_dir;
+            }
+        });
+        try {
+            localStorage.setItem('televault_sidebar_order', JSON.stringify(orderData));
+        } catch (_) {}
+        const ok = await window.TelegramAPI.saveSidebarOrder(orderData);
+        const msg = window.TeleVaultI18n ? 
+            window.TeleVaultI18n.t('sidebar.order_saved', 'Orden de canales y temas guardado correctamente.') : 
+            'Orden de canales y temas guardado correctamente.';
+        addLog(msg, ok ? 'success' : 'info');
+    }
+
+    async function handleResetSidebarOrder() {
+        try {
+            localStorage.removeItem('televault_sidebar_order');
+        } catch (_) {}
+        await window.TelegramAPI.resetSidebarOrder();
+        telegramData.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+        telegramData.forEach(g => {
+            g.sort_dir = 'asc';
+            if (g.tieneTemas && g.temas) {
+                g.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+            } else if (!g.tieneTemas && g.videos) {
+                g.videos.sort(compareTransformedTitles);
+            }
+        });
+        const msg = window.TeleVaultI18n ? 
+            window.TeleVaultI18n.t('sidebar.order_reset', 'Orden restablecido alfabéticamente.') : 
+            'Orden restablecido alfabéticamente.';
+        addLog(msg, 'info');
+        renderSidebar();
+        renderCategoriaOptions();
+    }
+
     // Pinta los datos y conserva lo que el usuario tenía seleccionado en el formulario
     function applyGroupsData(data) {
-        // Filtrar grupo "General" por si existiese y ordenar canales de forma natural
-        telegramData = (data || [])
-            .filter(g => g.nombre && g.nombre.trim().toLowerCase() !== 'general')
-            .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+        telegramData = applySidebarOrdering(data);
         renderSidebar();
 
         const prevCat = categoriaSelect.value;
@@ -688,6 +848,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ------------------------------------------------------------ Barra lateral
     function renderSidebar() {
         sidebarGroups.innerHTML = '';
+        if (sidebar) {
+            sidebar.classList.toggle('reorder-mode', isReorderMode);
+        }
+        if (btnReorderSidebar) {
+            btnReorderSidebar.classList.toggle('active', isReorderMode);
+            const reorderTitle = window.TeleVaultI18n ? 
+                (isReorderMode ? window.TeleVaultI18n.t('sidebar.save_order_title', 'Guardar nuevo orden') : window.TeleVaultI18n.t('sidebar.reorder_title', 'Organizar canales y temas')) :
+                (isReorderMode ? 'Guardar nuevo orden' : 'Organizar canales y temas');
+            btnReorderSidebar.title = reorderTitle;
+            btnReorderSidebar.setAttribute('aria-label', reorderTitle);
+            btnReorderSidebar.innerHTML = isReorderMode ? SVG.saveDisk : SVG.arrowUpDown;
+        }
+        if (btnResetSidebarOrder) {
+            btnResetSidebarOrder.classList.toggle('hidden', !isReorderMode);
+        }
+
         if (!telegramData || telegramData.length === 0) {
             const noChannelsText = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.no_channels', 'No hay canales configurados') : 'No hay canales configurados';
             const addChannelText = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.add_channel_btn', '➕ Añadir canal') : '➕ Añadir canal';
@@ -702,7 +878,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btnEmpty) btnEmpty.addEventListener('click', () => openChannelsModal(true));
             return;
         }
-        telegramData.forEach(grupo => {
+        telegramData.forEach((grupo, gIdx) => {
             const folderDiv = document.createElement('div');
             folderDiv.className = 'folder-item folder-collapsible';
             const isChannelExpanded = expandedChannels.has(grupo.id);
@@ -717,6 +893,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             titleDiv.setAttribute('aria-expanded', String(isChannelExpanded));
             titleDiv.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.toggle_channel_title', 'Haz clic para comprimir o descomprimir este canal') : 'Haz clic para comprimir o descomprimir este canal';
 
+            if (isReorderMode) {
+                const dragHandle = document.createElement('span');
+                dragHandle.className = 'folder-drag-handle';
+                dragHandle.textContent = '⠿';
+                dragHandle.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.drag_handle_title', 'Arrastra para mover') : 'Arrastra para mover';
+                dragHandle.addEventListener('click', (e) => e.stopPropagation());
+                titleDiv.appendChild(dragHandle);
+            }
+
             const toggleIcon = document.createElement('span');
             toggleIcon.className = 'folder-toggle-icon';
             toggleIcon.textContent = '▶';
@@ -730,6 +915,100 @@ document.addEventListener('DOMContentLoaded', async () => {
             titleText.textContent = grupo.nombre;
 
             titleDiv.append(toggleIcon, folderIcon, titleText);
+
+            if (isReorderMode) {
+                const orderActions = document.createElement('div');
+                orderActions.className = 'folder-order-actions';
+
+                const btnSort = document.createElement('button');
+                btnSort.type = 'button';
+                btnSort.className = 'btn-sort-toggle';
+                const isDesc = (grupo.sort_dir === 'desc');
+                btnSort.textContent = isDesc ? 'Z-A' : 'A-Z';
+                btnSort.title = isDesc ? 
+                    (window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.sort_az', 'Ordenar A-Z') : 'Ordenar A-Z') : 
+                    (window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.sort_za', 'Ordenar Z-A') : 'Ordenar Z-A');
+                btnSort.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    toggleGroupSort(grupo.id);
+                });
+
+                const btnUp = document.createElement('button');
+                btnUp.type = 'button';
+                btnUp.className = 'btn-move-arrow';
+                btnUp.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_up', 'Subir posición') : 'Subir posición';
+                btnUp.innerHTML = SVG.chevronUp;
+                btnUp.disabled = (gIdx === 0);
+                btnUp.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    moveGroup(gIdx, -1);
+                });
+
+                const btnDown = document.createElement('button');
+                btnDown.type = 'button';
+                btnDown.className = 'btn-move-arrow';
+                btnDown.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_down', 'Bajar posición') : 'Bajar posición';
+                btnDown.innerHTML = SVG.chevronDown;
+                btnDown.disabled = (gIdx === telegramData.length - 1);
+                btnDown.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    moveGroup(gIdx, 1);
+                });
+
+                orderActions.append(btnSort, btnUp, btnDown);
+                titleDiv.appendChild(orderActions);
+
+                folderDiv.setAttribute('draggable', 'true');
+                folderDiv.addEventListener('dragstart', (e) => {
+                    if (!isReorderMode) return;
+                    draggedItem = { type: 'group', id: String(grupo.id), index: gIdx };
+                    e.dataTransfer.setData('text/plain', JSON.stringify(draggedItem));
+                    e.dataTransfer.effectAllowed = 'move';
+                    folderDiv.classList.add('dragging');
+                });
+                folderDiv.addEventListener('dragend', () => {
+                    folderDiv.classList.remove('dragging');
+                    document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                        el.classList.remove('drag-over-top', 'drag-over-bottom');
+                    });
+                    draggedItem = null;
+                });
+                folderDiv.addEventListener('dragover', (e) => {
+                    if (!isReorderMode || !draggedItem || draggedItem.type !== 'group') return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const rect = folderDiv.getBoundingClientRect();
+                    const midY = rect.top + rect.height / 2;
+                    if (e.clientY < midY) {
+                        folderDiv.classList.add('drag-over-top');
+                        folderDiv.classList.remove('drag-over-bottom');
+                    } else {
+                        folderDiv.classList.add('drag-over-bottom');
+                        folderDiv.classList.remove('drag-over-top');
+                    }
+                });
+                folderDiv.addEventListener('dragleave', () => {
+                    folderDiv.classList.remove('drag-over-top', 'drag-over-bottom');
+                });
+                folderDiv.addEventListener('drop', (e) => {
+                    if (!isReorderMode || !draggedItem || draggedItem.type !== 'group') return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    folderDiv.classList.remove('drag-over-top', 'drag-over-bottom');
+                    const fromIdx = draggedItem.index;
+                    const rect = folderDiv.getBoundingClientRect();
+                    const isTop = e.clientY < (rect.top + rect.height / 2);
+                    let toIdx = isTop ? gIdx : gIdx + 1;
+                    if (fromIdx < toIdx) toIdx--;
+                    if (fromIdx !== toIdx) {
+                        const item = telegramData.splice(fromIdx, 1)[0];
+                        telegramData.splice(toIdx, 0, item);
+                        renderSidebar();
+                        renderCategoriaOptions();
+                    }
+                });
+            }
+
             folderDiv.appendChild(titleDiv);
 
             const toggleChannel = () => {
@@ -752,16 +1031,16 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             });
 
-            // Filtrar temas para no mostrar "General" ni id 1 y ordenar de forma natural
-            const temasFiltrados = (grupo.temas || [])
-                .filter(t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general')
-                .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+            // Filtrar temas para no mostrar "General" ni id 1
+            const temasFiltrados = (grupo.temas || []).filter(
+                t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general'
+            );
 
             if (grupo.tieneTemas && temasFiltrados.length > 0) {
                 const sublist = document.createElement('ul');
                 sublist.className = 'subfolder-list';
 
-                temasFiltrados.forEach(tema => {
+                temasFiltrados.forEach((tema, tIdx) => {
                     const subItem = document.createElement('li');
                     subItem.className = 'subfolder-item';
 
@@ -779,6 +1058,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                         row.tabIndex = 0;
                         row.setAttribute('role', 'button');
 
+                        if (isReorderMode) {
+                            const topicDrag = document.createElement('span');
+                            topicDrag.className = 'subfolder-drag-handle';
+                            topicDrag.textContent = '⠿';
+                            topicDrag.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.drag_handle_title', 'Arrastra para mover') : 'Arrastra para mover';
+                            topicDrag.addEventListener('click', (e) => e.stopPropagation());
+                            row.appendChild(topicDrag);
+                        }
+
                         const icon = document.createElement('span');
                         icon.className = 'toggle-icon';
                         icon.textContent = '▶';
@@ -791,27 +1079,116 @@ document.addEventListener('DOMContentLoaded', async () => {
                         count.className = 'video-count';
                         count.textContent = videos.length;
 
-                        // Botón de descarga de todos los vídeos del tema
-                        const btnDlTopic = document.createElement('button');
-                        btnDlTopic.type = 'button';
-                        btnDlTopic.className = 'btn-download-topic';
-                        const dlAllTitle = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.download_all_topic', 'Descargar todos los archivos') : 'Descargar todos los archivos';
-                        btnDlTopic.title = isDownloading ? getDownloadLockedMsg() : dlAllTitle;
-                        btnDlTopic.disabled = isDownloading;
-                        btnDlTopic.innerHTML = SVG.download;
-                        btnDlTopic.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            if (isDownloading) return;
-                            pendingTopicDownload = { categoryId: grupo.id, topicId: tema.id, topicName: tema.nombre };
-                            if (downloadTopicModalText) {
-                                downloadTopicModalText.textContent = `¿Deseas descargar todos los vídeos del tema "${tema.nombre}"?`;
-                            }
-                            if (downloadTopicModal) {
-                                downloadTopicModal.classList.remove('hidden');
-                            }
-                        });
+                        row.append(icon, name, count);
 
-                        row.append(icon, name, count, btnDlTopic);
+                        if (isReorderMode) {
+                            const topicActions = document.createElement('div');
+                            topicActions.className = 'subfolder-order-actions';
+
+                            const btnUp = document.createElement('button');
+                            btnUp.type = 'button';
+                            btnUp.className = 'btn-move-arrow';
+                            btnUp.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_up', 'Subir posición') : 'Subir posición';
+                            btnUp.innerHTML = SVG.chevronUp;
+                            btnUp.disabled = (tIdx === 0);
+                            btnUp.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                moveTopic(grupo.id, tIdx, -1);
+                            });
+
+                            const btnDown = document.createElement('button');
+                            btnDown.type = 'button';
+                            btnDown.className = 'btn-move-arrow';
+                            btnDown.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_down', 'Bajar posición') : 'Bajar posición';
+                            btnDown.innerHTML = SVG.chevronDown;
+                            btnDown.disabled = (tIdx === temasFiltrados.length - 1);
+                            btnDown.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                moveTopic(grupo.id, tIdx, 1);
+                            });
+
+                            topicActions.append(btnUp, btnDown);
+                            row.appendChild(topicActions);
+
+                            subItem.setAttribute('draggable', 'true');
+                            subItem.addEventListener('dragstart', (e) => {
+                                if (!isReorderMode) return;
+                                e.stopPropagation();
+                                draggedItem = { type: 'topic', groupId: String(grupo.id), topicId: String(tema.id), index: tIdx };
+                                e.dataTransfer.setData('text/plain', JSON.stringify(draggedItem));
+                                e.dataTransfer.effectAllowed = 'move';
+                                subItem.classList.add('dragging');
+                            });
+                            subItem.addEventListener('dragend', (e) => {
+                                e.stopPropagation();
+                                subItem.classList.remove('dragging');
+                                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                                    el.classList.remove('drag-over-top', 'drag-over-bottom');
+                                });
+                                draggedItem = null;
+                            });
+                            subItem.addEventListener('dragover', (e) => {
+                                if (!isReorderMode || !draggedItem || draggedItem.type !== 'topic') return;
+                                if (draggedItem.groupId !== String(grupo.id)) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                e.dataTransfer.dropEffect = 'move';
+                                const rect = subItem.getBoundingClientRect();
+                                const midY = rect.top + rect.height / 2;
+                                if (e.clientY < midY) {
+                                    subItem.classList.add('drag-over-top');
+                                    subItem.classList.remove('drag-over-bottom');
+                                } else {
+                                    subItem.classList.add('drag-over-bottom');
+                                    subItem.classList.remove('drag-over-top');
+                                }
+                            });
+                            subItem.addEventListener('dragleave', (e) => {
+                                e.stopPropagation();
+                                subItem.classList.remove('drag-over-top', 'drag-over-bottom');
+                            });
+                            subItem.addEventListener('drop', (e) => {
+                                if (!isReorderMode || !draggedItem || draggedItem.type !== 'topic') return;
+                                if (draggedItem.groupId !== String(grupo.id)) return;
+                                e.preventDefault();
+                                e.stopPropagation();
+                                subItem.classList.remove('drag-over-top', 'drag-over-bottom');
+                                const fromIdx = draggedItem.index;
+                                const rect = subItem.getBoundingClientRect();
+                                const isTop = e.clientY < (rect.top + rect.height / 2);
+                                let toIdx = isTop ? tIdx : tIdx + 1;
+                                if (fromIdx < toIdx) toIdx--;
+                                if (fromIdx !== toIdx) {
+                                    const item = grupo.temas.splice(fromIdx, 1)[0];
+                                    grupo.temas.splice(toIdx, 0, item);
+                                    renderSidebar();
+                                    if (categoriaSelect.value === String(grupo.id)) {
+                                        populateSubcategorias(grupo);
+                                    }
+                                }
+                            });
+                        } else {
+                            // Botón de descarga de todos los vídeos del tema
+                            const btnDlTopic = document.createElement('button');
+                            btnDlTopic.type = 'button';
+                            btnDlTopic.className = 'btn-download-topic';
+                            const dlAllTitle = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.download_all_topic', 'Descargar todos los archivos') : 'Descargar todos los archivos';
+                            btnDlTopic.title = isDownloading ? getDownloadLockedMsg() : dlAllTitle;
+                            btnDlTopic.disabled = isDownloading;
+                            btnDlTopic.innerHTML = SVG.download;
+                            btnDlTopic.addEventListener('click', (e) => {
+                                e.stopPropagation();
+                                if (isDownloading) return;
+                                pendingTopicDownload = { categoryId: grupo.id, topicId: tema.id, topicName: tema.nombre };
+                                if (downloadTopicModalText) {
+                                    downloadTopicModalText.textContent = `¿Deseas descargar todos los vídeos del tema "${tema.nombre}"?`;
+                                }
+                                if (downloadTopicModal) {
+                                    downloadTopicModal.classList.remove('hidden');
+                                }
+                            });
+                            row.appendChild(btnDlTopic);
+                        }
 
                         const videoList = document.createElement('ul');
                         videoList.className = 'video-list';
@@ -864,7 +1241,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else if (!grupo.tieneTemas && grupo.videos && grupo.videos.length > 0) {
                 const videoList = document.createElement('ul');
                 videoList.className = 'video-list direct-channel-videos';
-                const directVideos = (grupo.videos || []).slice().sort(compareTransformedTitles);
+                const directVideos = (grupo.videos || []).slice();
+                if (grupo.sort_dir === 'desc') {
+                    directVideos.sort((a, b) => compareTransformedTitles(b, a));
+                } else {
+                    directVideos.sort(compareTransformedTitles);
+                }
 
                 directVideos.forEach(v => {
                     const li = document.createElement('li');
@@ -1043,10 +1425,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeSubcategoriaDropdown();
             return;
         }
-        // Filtrar temas para no mostrar ni permitir elegir "General" y ordenar de forma natural
-        const temasFiltrados = (grupo.temas || [])
-            .filter(t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general')
-            .sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+        // Filtrar temas para no mostrar ni permitir elegir "General" respetando el orden del grupo
+        const temasFiltrados = (grupo.temas || []).filter(
+            t => String(t.id) !== '1' && t.nombre.trim().toLowerCase() !== 'general'
+        );
         currentComboboxTopics = temasFiltrados.map(t => ({ id: String(t.id), nombre: t.nombre }));
         temasFiltrados.forEach(tema => {
             const opt = document.createElement('option');
@@ -1299,7 +1681,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const grupoNuevo = telegramData.find(g => g.id === categoryId);
                 if (grupoNuevo && !grupoNuevo.temas.some(t => t.id === result.topic.id)) {
                     grupoNuevo.temas.push({ id: result.topic.id, nombre: result.topic.nombre, videos: [] });
-                    grupoNuevo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+                    if (grupoNuevo.sort_dir === 'desc') {
+                        grupoNuevo.temas.sort((a, b) => naturalCompare(b.nombre || '', a.nombre || ''));
+                    } else if (!getStoredSidebarOrder() || !getStoredSidebarOrder().topics || !getStoredSidebarOrder().topics[String(grupoNuevo.id)]) {
+                        grupoNuevo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
+                    }
                 }
                 expandedChannels.add(categoryId);
                 renderSidebar();
@@ -3729,6 +4115,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (btnRescanAll) btnRescanAll.classList.remove('is-spinning');
             if (btnModalRescanChannels) btnModalRescanChannels.classList.remove('is-spinning');
         }
+    }
+
+    if (btnReorderSidebar) {
+        btnReorderSidebar.addEventListener('click', toggleReorderMode);
+    }
+    if (btnResetSidebarOrder) {
+        btnResetSidebarOrder.addEventListener('click', handleResetSidebarOrder);
     }
 
     if (btnRescanAll) {

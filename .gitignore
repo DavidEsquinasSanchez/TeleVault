@@ -21,6 +21,8 @@ channels.json
 backend/channels.json
 topics_cache.json
 backend/topics_cache.json
+sidebar_order.json
+backend/sidebar_order.json
 *.tmp
 backend/*.tmp
 backend/temp_uploads/

@@ -705,6 +705,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } else {
                     grupo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
                 }
+            } else if (!grupo.tieneTemas && grupo.videos) {
+                if (order && order.direct_videos && Array.isArray(order.direct_videos[String(grupo.id)])) {
+                    const customList = order.direct_videos[String(grupo.id)];
+                    const posMap = new Map(customList.map((name, idx) => [name, idx]));
+                    const maxIdx = customList.length;
+                    grupo.videos.sort((a, b) => {
+                        const hasA = posMap.has(a);
+                        const hasB = posMap.has(b);
+                        if (hasA && hasB) return posMap.get(a) - posMap.get(b);
+                        if (hasA) return -1;
+                        if (hasB) return 1;
+                        return compareTransformedTitles(a, b);
+                    });
+                } else {
+                    if (grupo.sort_dir === 'desc') {
+                        grupo.videos.sort((a, b) => compareTransformedTitles(b, a));
+                    } else {
+                        grupo.videos.sort(compareTransformedTitles);
+                    }
+                }
             }
         });
         return list;
@@ -730,6 +750,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (categoriaSelect.value === String(groupId)) {
             populateSubcategorias(grupo);
         }
+    }
+
+    function moveDirectVideo(groupId, fromIdx, dir) {
+        const grupo = telegramData.find(g => String(g.id) === String(groupId));
+        if (!grupo || !grupo.videos) return;
+        const toIdx = fromIdx + dir;
+        if (toIdx < 0 || toIdx >= grupo.videos.length) return;
+        const item = grupo.videos.splice(fromIdx, 1)[0];
+        grupo.videos.splice(toIdx, 0, item);
+        renderSidebar();
     }
 
     function toggleGroupSort(groupId) {
@@ -771,11 +801,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         const orderData = {
             channels: telegramData.map(g => String(g.id)),
             topics: {},
-            video_sort: {}
+            video_sort: {},
+            direct_videos: {}
         };
         telegramData.forEach(g => {
             if (g.sort_dir) {
                 orderData.video_sort[String(g.id)] = g.sort_dir;
+            }
+            if (!g.tieneTemas && Array.isArray(g.videos)) {
+                orderData.direct_videos[String(g.id)] = g.videos.slice();
             }
         });
         try {
@@ -1238,36 +1272,126 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else if (!grupo.tieneTemas && grupo.videos && grupo.videos.length > 0) {
                 const videoList = document.createElement('ul');
                 videoList.className = 'video-list direct-channel-videos';
-                const directVideos = (grupo.videos || []).slice();
-                if (grupo.sort_dir === 'desc') {
-                    directVideos.sort((a, b) => compareTransformedTitles(b, a));
-                } else {
-                    directVideos.sort(compareTransformedTitles);
-                }
+                const directVideos = grupo.videos;
 
-                directVideos.forEach(v => {
+                directVideos.forEach((v, vIdx) => {
                     const li = document.createElement('li');
                     li.className = 'video-item';
+
+                    if (isReorderMode) {
+                        const dragHandle = document.createElement('span');
+                        dragHandle.className = 'subfolder-drag-handle video-drag-handle';
+                        dragHandle.textContent = '⠿';
+                        dragHandle.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.drag_handle_title', 'Arrastra para mover') : 'Arrastra para mover';
+                        dragHandle.addEventListener('click', (e) => e.stopPropagation());
+                        li.appendChild(dragHandle);
+                    }
 
                     const vTitle = document.createElement('span');
                     vTitle.className = 'video-item-title';
                     vTitle.textContent = v;
                     vTitle.title = v;
+                    li.appendChild(vTitle);
 
-                    const btnDlVideo = document.createElement('button');
-                    btnDlVideo.type = 'button';
-                    btnDlVideo.className = 'btn-download-video';
-                    const dlVideoTitle = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.download_video', 'Descargar video') : 'Descargar video';
-                    btnDlVideo.title = isDownloading ? getDownloadLockedMsg() : dlVideoTitle;
-                    btnDlVideo.disabled = isDownloading;
-                    btnDlVideo.innerHTML = SVG.download;
-                    btnDlVideo.addEventListener('click', async (e) => {
-                        e.stopPropagation();
-                        if (isDownloading) return;
-                        await promptAndAddVideoToDownloadList(grupo.id, null, v);
-                    });
+                    if (isReorderMode) {
+                        const orderActions = document.createElement('div');
+                        orderActions.className = 'subfolder-order-actions video-order-actions';
 
-                    li.append(vTitle, btnDlVideo);
+                        const btnUp = document.createElement('button');
+                        btnUp.type = 'button';
+                        btnUp.className = 'btn-move-arrow';
+                        btnUp.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_up', 'Subir posición') : 'Subir posición';
+                        btnUp.innerHTML = SVG.chevronUp;
+                        btnUp.disabled = (vIdx === 0);
+                        btnUp.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            moveDirectVideo(grupo.id, vIdx, -1);
+                        });
+
+                        const btnDown = document.createElement('button');
+                        btnDown.type = 'button';
+                        btnDown.className = 'btn-move-arrow';
+                        btnDown.title = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.move_down', 'Bajar posición') : 'Bajar posición';
+                        btnDown.innerHTML = SVG.chevronDown;
+                        btnDown.disabled = (vIdx === directVideos.length - 1);
+                        btnDown.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            moveDirectVideo(grupo.id, vIdx, 1);
+                        });
+
+                        orderActions.append(btnUp, btnDown);
+                        li.appendChild(orderActions);
+
+                        li.setAttribute('draggable', 'true');
+                        li.addEventListener('dragstart', (e) => {
+                            if (!isReorderMode) return;
+                            e.stopPropagation();
+                            draggedItem = { type: 'video', groupId: String(grupo.id), videoName: v, index: vIdx };
+                            e.dataTransfer.setData('text/plain', JSON.stringify(draggedItem));
+                            e.dataTransfer.effectAllowed = 'move';
+                            li.classList.add('dragging');
+                        });
+                        li.addEventListener('dragend', (e) => {
+                            e.stopPropagation();
+                            li.classList.remove('dragging');
+                            document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                                el.classList.remove('drag-over-top', 'drag-over-bottom');
+                            });
+                            draggedItem = null;
+                        });
+                        li.addEventListener('dragover', (e) => {
+                            if (!isReorderMode || !draggedItem || draggedItem.type !== 'video') return;
+                            if (draggedItem.groupId !== String(grupo.id)) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'move';
+                            const rect = li.getBoundingClientRect();
+                            const midY = rect.top + rect.height / 2;
+                            if (e.clientY < midY) {
+                                li.classList.add('drag-over-top');
+                                li.classList.remove('drag-over-bottom');
+                            } else {
+                                li.classList.add('drag-over-bottom');
+                                li.classList.remove('drag-over-top');
+                            }
+                        });
+                        li.addEventListener('dragleave', (e) => {
+                            e.stopPropagation();
+                            li.classList.remove('drag-over-top', 'drag-over-bottom');
+                        });
+                        li.addEventListener('drop', (e) => {
+                            if (!isReorderMode || !draggedItem || draggedItem.type !== 'video') return;
+                            if (draggedItem.groupId !== String(grupo.id)) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            li.classList.remove('drag-over-top', 'drag-over-bottom');
+                            const fromIdx = draggedItem.index;
+                            const rect = li.getBoundingClientRect();
+                            const isTop = e.clientY < (rect.top + rect.height / 2);
+                            let toIdx = isTop ? vIdx : vIdx + 1;
+                            if (fromIdx < toIdx) toIdx--;
+                            if (fromIdx !== toIdx) {
+                                const item = grupo.videos.splice(fromIdx, 1)[0];
+                                grupo.videos.splice(toIdx, 0, item);
+                                renderSidebar();
+                            }
+                        });
+                    } else {
+                        const btnDlVideo = document.createElement('button');
+                        btnDlVideo.type = 'button';
+                        btnDlVideo.className = 'btn-download-video';
+                        const dlVideoTitle = window.TeleVaultI18n ? window.TeleVaultI18n.t('sidebar.download_video', 'Descargar video') : 'Descargar video';
+                        btnDlVideo.title = isDownloading ? getDownloadLockedMsg() : dlVideoTitle;
+                        btnDlVideo.disabled = isDownloading;
+                        btnDlVideo.innerHTML = SVG.download;
+                        btnDlVideo.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            if (isDownloading) return;
+                            await promptAndAddVideoToDownloadList(grupo.id, null, v);
+                        });
+                        li.appendChild(btnDlVideo);
+                    }
+
                     videoList.appendChild(li);
                 });
                 folderDiv.appendChild(videoList);

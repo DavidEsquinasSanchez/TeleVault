@@ -619,7 +619,8 @@ body.resizing-sidebar * {
 }
 
 .folder-drag-handle,
-.subfolder-drag-handle {
+.subfolder-drag-handle,
+.video-drag-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -634,13 +635,15 @@ body.resizing-sidebar * {
 }
 
 .folder-drag-handle:hover,
-.subfolder-drag-handle:hover {
+.subfolder-drag-handle:hover,
+.video-drag-handle:hover {
     opacity: 1;
     color: var(--accent);
 }
 
 .folder-drag-handle:active,
-.subfolder-drag-handle:active {
+.subfolder-drag-handle:active,
+.video-drag-handle:active {
     cursor: grabbing;
 }
 
@@ -651,7 +654,8 @@ body.resizing-sidebar * {
     margin-left: auto;
 }
 
-.subfolder-order-actions {
+.subfolder-order-actions,
+.video-order-actions {
     display: inline-flex;
     align-items: center;
     gap: 2px;
@@ -708,19 +712,22 @@ body.resizing-sidebar * {
 }
 
 .folder-item.dragging,
-.subfolder-item.dragging {
+.subfolder-item.dragging,
+.video-item.dragging {
     opacity: 0.35 !important;
     background-color: rgba(59, 130, 246, 0.12) !important;
     border-radius: 4px;
 }
 
 .folder-item.drag-over-top,
-.subfolder-item.drag-over-top {
+.subfolder-item.drag-over-top,
+.video-item.drag-over-top {
     border-top: 2px solid var(--accent) !important;
 }
 
 .folder-item.drag-over-bottom,
-.subfolder-item.drag-over-bottom {
+.subfolder-item.drag-over-bottom,
+.video-item.drag-over-bottom {
     border-bottom: 2px solid var(--accent) !important;
 }
 

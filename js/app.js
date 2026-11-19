@@ -637,10 +637,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Ignorar error inicial
         }
 
-        // Sincronizar orden personalizado de canales y temas desde backend si no está en localStorage
+        // Sincronizar orden personalizado de canales desde backend si no está en localStorage
         try {
             const serverOrder = await window.TelegramAPI.getSidebarOrder();
-            if (serverOrder && Array.isArray(serverOrder.channels) && serverOrder.channels.length > 0) {
+            if (serverOrder && typeof serverOrder === 'object') {
+                if (serverOrder.topics) delete serverOrder.topics;
                 localStorage.setItem('televault_sidebar_order', JSON.stringify(serverOrder));
             }
         } catch (_) {}
@@ -669,7 +670,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     function getStoredSidebarOrder() {
         try {
             const raw = localStorage.getItem('televault_sidebar_order');
-            if (raw) return JSON.parse(raw);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed && parsed.topics) delete parsed.topics;
+                return parsed;
+            }
         } catch (_) {}
         return null;
     }
@@ -679,13 +684,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         const order = getStoredSidebarOrder();
         if (order && Array.isArray(order.channels) && order.channels.length > 0) {
             const chMap = new Map(order.channels.map((id, idx) => [String(id), idx]));
-            const maxIdx = order.channels.length;
             list.sort((a, b) => {
-                const idxA = chMap.has(String(a.id)) ? chMap.get(String(a.id)) : maxIdx;
-                const idxB = chMap.has(String(b.id)) ? chMap.get(String(b.id)) : maxIdx;
-                if (idxA !== idxB) return idxA - idxB;
+                const hasA = chMap.has(String(a.id));
+                const hasB = chMap.has(String(b.id));
+                if (hasA && hasB) return chMap.get(String(a.id)) - chMap.get(String(b.id));
                 return naturalCompare(a.nombre || '', b.nombre || '');
             });
+        } else {
+            list.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
         }
         list.forEach(grupo => {
             if (order && order.video_sort && order.video_sort[String(grupo.id)]) {
@@ -694,16 +700,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 grupo.sort_dir = 'asc';
             }
             if (grupo.tieneTemas && grupo.temas) {
-                const topicOrder = order && order.topics ? order.topics[String(grupo.id)] : null;
-                if (Array.isArray(topicOrder) && topicOrder.length > 0) {
-                    const tMap = new Map(topicOrder.map((id, idx) => [String(id), idx]));
-                    const maxTIdx = topicOrder.length;
-                    grupo.temas.sort((a, b) => {
-                        const idxA = tMap.has(String(a.id)) ? tMap.get(String(a.id)) : maxTIdx;
-                        const idxB = tMap.has(String(b.id)) ? tMap.get(String(b.id)) : maxTIdx;
-                        if (idxA !== idxB) return idxA - idxB;
-                        return naturalCompare(a.nombre || '', b.nombre || '');
-                    });
+                if (grupo.sort_dir === 'desc') {
+                    grupo.temas.sort((a, b) => naturalCompare(b.nombre || '', a.nombre || ''));
+                } else {
+                    grupo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
                 }
             }
         });
@@ -774,9 +774,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             video_sort: {}
         };
         telegramData.forEach(g => {
-            if (g.tieneTemas && g.temas) {
-                orderData.topics[String(g.id)] = g.temas.map(t => String(t.id));
-            }
             if (g.sort_dir) {
                 orderData.video_sort[String(g.id)] = g.sort_dir;
             }
@@ -1683,7 +1680,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     grupoNuevo.temas.push({ id: result.topic.id, nombre: result.topic.nombre, videos: [] });
                     if (grupoNuevo.sort_dir === 'desc') {
                         grupoNuevo.temas.sort((a, b) => naturalCompare(b.nombre || '', a.nombre || ''));
-                    } else if (!getStoredSidebarOrder() || !getStoredSidebarOrder().topics || !getStoredSidebarOrder().topics[String(grupoNuevo.id)]) {
+                    } else {
                         grupoNuevo.temas.sort((a, b) => naturalCompare(a.nombre || '', b.nombre || ''));
                     }
                 }

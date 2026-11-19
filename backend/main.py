@@ -694,10 +694,11 @@ def load_channels() -> list:
 
 
 def save_channels(channels: list) -> None:
-    """Guarda de forma atómica la lista de canales en channels.json."""
+    """Guarda de forma atómica la lista de canales en channels.json (ordenada alfabéticamente)."""
+    sorted_channels = sorted(channels, key=lambda c: natural_sort_key(c.get("title", "")))
     tmp = CHANNELS_FILE.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"version": 1, "channels": channels}, f, ensure_ascii=False, indent=2)
+        json.dump({"version": 1, "channels": sorted_channels}, f, ensure_ascii=False, indent=2)
     os.replace(tmp, CHANNELS_FILE)
 
 
@@ -1463,15 +1464,10 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
             if str(tid) != "1" and tname.strip().lower() != "general"
         ]
 
-        if custom_topics:
-            t_order_map = {str(tid): idx for idx, tid in enumerate(custom_topics)}
-            max_t_idx = len(custom_topics)
-            sorted_topics_tuples = sorted(
-                filtered_topics,
-                key=lambda kv: (t_order_map.get(str(kv[0]), max_t_idx), natural_sort_key(kv[1]))
-            )
-        else:
-            sorted_topics_tuples = sorted(filtered_topics, key=lambda kv: natural_sort_key(kv[1]))
+        # Temas ordenados siempre de forma natural (alfabéticamente)
+        sorted_topics_tuples = sorted(filtered_topics, key=lambda kv: natural_sort_key(kv[1]))
+        if video_sort_dir == "desc":
+            sorted_topics_tuples.reverse()
 
         topics_list = [
             {
@@ -2453,6 +2449,10 @@ async def add_channel_api(channelInput: str = Form(...)):
     }
     channels.append(new_channel)
     save_channels(channels)
+    order_cfg = load_sidebar_order()
+    if order_cfg.get("channels"):
+        order_cfg["channels"] = [str(c["id"]) for c in sorted(channels, key=lambda x: natural_sort_key(x.get("title", "")))]
+        save_sidebar_order(order_cfg)
     asyncio.create_task(load_group(cid, rescan=True))
     log.info("Canal añadido: %s (id=%s, foro=%s)", title, cid, forum)
     return {"ok": True, "channel": new_channel, "message": f"Canal '{title}' añadido con éxito."}

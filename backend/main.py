@@ -1193,7 +1193,7 @@ async def check_bot_admin_status(entity_or_id):
 # ---------------------------------------------------------------------------
 # UTILIDADES DE MENSAJES
 # ---------------------------------------------------------------------------
-VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".flv", ".ts")
+VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".flv", ".ts", ".mpg", ".mpeg")
 
 
 def is_video(msg) -> bool:
@@ -1216,7 +1216,7 @@ def is_video(msg) -> bool:
         first_line = caption.splitlines()[0]
         if first_line.endswith(VIDEO_EXTENSIONS):
             return True
-        if re.search(r"\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts)\.\d{3,4}$", first_line):
+        if re.search(r"\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts|mpg|mpeg)\.\d{3,4}$", first_line):
             return True
 
     # 2. Comprobar atributos del documento
@@ -1227,7 +1227,7 @@ def is_video(msg) -> bool:
             fname = attr.file_name.lower()
             if fname.endswith(VIDEO_EXTENSIONS):
                 return True
-            if re.search(r"\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts)\.\d{3,4}$", fname):
+            if re.search(r"\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts|mpg|mpeg)\.\d{3,4}$", fname):
                 return True
             if re.search(r"\.\d{3,4}$", fname):
                 return True
@@ -1853,7 +1853,7 @@ root.withdraw()
 root.attributes("-topmost", True)
 paths = filedialog.askopenfilenames(
     parent=root, title="Selecciona los vídeos a subir",
-    filetypes=[("Vídeos", "*.mp4 *.mkv *.avi *.mov *.webm *.m4v *.wmv *.flv *.ts"),
+    filetypes=[("Vídeos", "*.mp4 *.mkv *.avi *.mov *.webm *.m4v *.wmv *.flv *.ts *.mpg *.mpeg"),
                ("Todos los archivos", "*.*")])
 root.destroy()
 sys.stdout.write(json.dumps(list(paths), ensure_ascii=True))
@@ -2864,6 +2864,9 @@ def detect_container_format(file_path: str) -> Optional[str]:
         # MPEG-TS (sync byte 0x47 con periodicidad de 188 o 204 bytes)
         if header[0] == 0x47 and len(header) >= 376 and header[188] == 0x47:
             return ".ts"
+        # MPEG-1 / MPEG-2 Program Stream (.mpg / .mpeg)
+        if header.startswith(b"\x00\x00\x01\xba"):
+            return ".mpg"
     except Exception as e:
         log.warning("No se pudo inspeccionar cabecera binaria de '%s': %s", file_path, e)
     return None

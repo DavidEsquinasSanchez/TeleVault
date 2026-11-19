@@ -632,18 +632,19 @@ def natural_sort_key(s: str):
 def load_sidebar_order() -> dict:
     """Devuelve la configuración de orden manual de canales y temas."""
     if not SIDEBAR_ORDER_FILE.is_file():
-        return {"channels": [], "topics": {}, "video_sort": {}}
+        return {"channels": [], "topics": {}, "video_sort": {}, "direct_videos": {}}
     try:
         with open(SIDEBAR_ORDER_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             return {
                 "channels": [str(c) for c in data.get("channels", [])],
                 "topics": {str(k): [str(t) for t in v] for k, v in data.get("topics", {}).items()},
-                "video_sort": {str(k): str(v) for k, v in data.get("video_sort", {}).items()}
+                "video_sort": {str(k): str(v) for k, v in data.get("video_sort", {}).items()},
+                "direct_videos": {str(k): [str(x) for x in v] for k, v in data.get("direct_videos", {}).items()}
             }
     except Exception as e:
         log.warning("No se pudo leer %s: %s", SIDEBAR_ORDER_FILE, public_error(e))
-        return {"channels": [], "topics": {}, "video_sort": {}}
+        return {"channels": [], "topics": {}, "video_sort": {}, "direct_videos": {}}
 
 
 def save_sidebar_order(order_data: dict) -> None:
@@ -654,6 +655,7 @@ def save_sidebar_order(order_data: dict) -> None:
         "channels": [str(c) for c in order_data.get("channels", [])],
         "topics": {str(k): [str(t) for t in v] for k, v in order_data.get("topics", {}).items()},
         "video_sort": {str(k): str(v) for k, v in order_data.get("video_sort", {}).items()},
+        "direct_videos": {str(k): [str(x) for x in v] for k, v in order_data.get("direct_videos", {}).items()},
         "updated_at": int(time.time())
     }
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1447,6 +1449,7 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
     order_cfg = load_sidebar_order()
     custom_topics = order_cfg.get("topics", {}).get(str(identifier), [])
     video_sort_dir = order_cfg.get("video_sort", {}).get(str(identifier), "asc")
+    custom_direct_videos = order_cfg.get("direct_videos", {}).get(str(identifier), [])
 
     if forum:
         by_topic = {}
@@ -1479,9 +1482,18 @@ def assemble_group(identifier, title, forum, topics, videos) -> dict:
             for tid, tname in sorted_topics_tuples
         ]
     else:
-        direct_videos = sorted([item[1] for item in videos.values()], key=natural_sort_key)
-        if video_sort_dir == "desc":
-            direct_videos.reverse()
+        raw_direct = [item[1] for item in videos.values()]
+        if custom_direct_videos:
+            order_map = {name: idx for idx, name in enumerate(custom_direct_videos)}
+            max_idx = len(custom_direct_videos)
+            direct_videos = sorted(
+                raw_direct,
+                key=lambda x: (order_map.get(x, max_idx), natural_sort_key(x))
+            )
+        else:
+            direct_videos = sorted(raw_direct, key=natural_sort_key)
+            if video_sort_dir == "desc":
+                direct_videos.reverse()
         direct_sizes = {item[1]: (item[2] if len(item) > 2 else 0) for item in videos.values()}
 
     return {

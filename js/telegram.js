@@ -252,7 +252,7 @@ const TelegramAPI = {
         });
         if (!response.ok) throw new Error(await readError(response));
         const data = await response.json();
-        return data.report || null;
+        return data;
     },
 
     // Prepara los elementos seleccionados de la auditoría para la cola de subidas
@@ -264,7 +264,7 @@ const TelegramAPI = {
         });
         if (!response.ok) throw new Error(await readError(response));
         const data = await response.json();
-        return data.queue_items || [];
+        return data;
     },
 
     // Obtiene la configuración de orden personalizado del sidebar

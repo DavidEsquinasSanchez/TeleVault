@@ -4893,6 +4893,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             inputAuditFolder.value = lastFolder;
             if (btnStartAuditScan) btnStartAuditScan.disabled = false;
         }
+        updateAuditFooterSummary();
         auditModal.classList.remove('hidden');
     }
 
@@ -4934,9 +4935,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             const recursive = checkAuditRecursive ? checkAuditRecursive.checked : true;
             const res = await window.TelegramAPI.scanAuditFolder(folder, recursive);
+            const report = (res && res.report) ? res.report : (res && res.items ? res : null);
 
-            if (res && res.ok && res.report) {
-                currentAuditReport = res.report;
+            if (report && Array.isArray(report.items)) {
+                currentAuditReport = report;
                 selectedAuditFiles.clear();
 
                 // Por defecto, preseleccionar los vídeos que faltan por subir y tienen destino sugerido
@@ -4947,13 +4949,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
 
                 // Actualizar métricas
-                const sum = currentAuditReport.summary;
+                const sum = currentAuditReport.summary || {
+                    total_files: currentAuditReport.total_files || 0,
+                    total_size: 0,
+                    uploaded_files: currentAuditReport.already_uploaded_count || 0,
+                    uploaded_size: 0,
+                    missing_files: currentAuditReport.missing_count || 0,
+                    missing_size: currentAuditReport.missing_bytes || 0
+                };
                 if (metricAuditTotal) metricAuditTotal.textContent = sum.total_files;
-                if (metricAuditTotalSize) metricAuditTotalSize.textContent = window.TelegramAPI.formatBytes(sum.total_size);
+                if (metricAuditTotalSize) metricAuditTotalSize.textContent = window.TelegramAPI.formatBytes(sum.total_size || 0);
                 if (metricAuditUploaded) metricAuditUploaded.textContent = sum.uploaded_files;
-                if (metricAuditUploadedSize) metricAuditUploadedSize.textContent = window.TelegramAPI.formatBytes(sum.uploaded_size);
+                if (metricAuditUploadedSize) metricAuditUploadedSize.textContent = window.TelegramAPI.formatBytes(sum.uploaded_size || 0);
                 if (metricAuditMissing) metricAuditMissing.textContent = sum.missing_files;
-                if (metricAuditMissingSize) metricAuditMissingSize.textContent = window.TelegramAPI.formatBytes(sum.missing_size);
+                if (metricAuditMissingSize) metricAuditMissingSize.textContent = window.TelegramAPI.formatBytes(sum.missing_size || 0);
 
                 // Contadores en pestañas de filtro
                 if (countAuditFilterMissing) countAuditFilterMissing.textContent = sum.missing_files;
@@ -5254,9 +5263,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             btnConfirmAuditQueue.disabled = (count === 0);
         }
         if (btnConfirmAuditQueueText) {
-            btnConfirmAuditQueueText.textContent = window.TeleVaultI18n
-                ? (count > 0 ? window.TeleVaultI18n.t('audit.btn_add_to_queue', `Añadir a la cola (${count})`, { count: count }) : window.TeleVaultI18n.t('audit.btn_add_to_queue_zero', 'Añadir a la cola'))
-                : (count > 0 ? `Añadir a la cola (${count})` : 'Añadir a la cola');
+            if (count > 0) {
+                btnConfirmAuditQueueText.textContent = window.TeleVaultI18n
+                    ? window.TeleVaultI18n.t('audit.btn_add_to_queue_count', `Añadir a la cola (${count})`, { count: count })
+                    : `Añadir a la cola (${count})`;
+            } else {
+                btnConfirmAuditQueueText.textContent = window.TeleVaultI18n
+                    ? window.TeleVaultI18n.t('audit.btn_add_to_queue', 'Añadir a la cola')
+                    : 'Añadir a la cola';
+            }
         }
     }
 
@@ -5316,9 +5331,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             }));
 
             const res = await window.TelegramAPI.prepareAuditQueue(payload);
-            if (res && res.ok && Array.isArray(res.queue_items)) {
+            const queueItems = (res && Array.isArray(res.queue_items)) ? res.queue_items : (Array.isArray(res) ? res : []);
+            if (queueItems.length > 0) {
                 let addedCount = 0;
-                for (const item of res.queue_items) {
+                for (const item of queueItems) {
                     if (filesToUpload.some(f => f.id === item.id)) continue;
                     const displayName = item.isPart
                         ? `${item.name} (Parte ${item.partIndex}/${item.totalParts})`

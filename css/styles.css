@@ -4562,3 +4562,429 @@ body.light-theme .btn-bot-link:hover {
     background-color: #3b82f6;
     color: #ffffff;
 }
+
+/* ==========================================================================
+   AUDITOR Y SINCRONIZADOR DE CARPETA LOCAL (eMule / Descargas)
+   ========================================================================== */
+.btn-audit-folder {
+    padding: 7px 14px;
+    font-size: 0.86rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border-color: #38bdf8;
+    color: #38bdf8;
+    background-color: rgba(56, 189, 248, 0.08);
+    transition: all 0.2s ease;
+}
+
+.btn-audit-folder:hover:not(:disabled) {
+    background-color: rgba(56, 189, 248, 0.18);
+    border-color: #7dd3fc;
+    color: #bae6fd;
+    transform: translateY(-1px);
+}
+
+.modal-audit-content {
+    max-width: 1040px;
+    width: 94%;
+    max-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    padding: 22px 24px;
+    text-align: left;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.audit-config-bar {
+    background-color: rgba(15, 23, 42, 0.75);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.audit-folder-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.audit-folder-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-input, #0f172a);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text-main);
+    font-size: 0.88rem;
+}
+
+.btn-audit-browse {
+    padding: 8px 14px;
+    font-size: 0.86rem;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.btn-audit-scan {
+    padding: 8px 18px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border-radius: 6px;
+    white-space: nowrap;
+}
+
+.audit-options-row {
+    display: flex;
+    align-items: center;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.audit-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.audit-metric-card {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-left-width: 4px;
+}
+
+.audit-metric-card.metric-total {
+    border-left-color: #38bdf8;
+}
+
+.audit-metric-card.metric-uploaded {
+    border-left-color: #22c55e;
+}
+
+.audit-metric-card.metric-missing {
+    border-left-color: #f59e0b;
+}
+
+.audit-metric-card .metric-label {
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.audit-metric-card .metric-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.2;
+}
+
+.audit-metric-card .metric-sub {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.audit-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.audit-filter-pills {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.audit-filter-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.audit-filter-pill:hover {
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+
+.audit-filter-pill.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.audit-search-wrapper {
+    flex: 1;
+    min-width: 180px;
+    max-width: 320px;
+}
+
+.audit-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg-input, #0f172a);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 0.82rem;
+    color: var(--text-main);
+}
+
+.audit-selection-tools {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-audit-tool {
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    border-radius: 6px;
+}
+
+.audit-body {
+    flex: 1;
+    min-height: 220px;
+    max-height: 48vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(10, 15, 30, 0.5);
+    position: relative;
+}
+
+.audit-state-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    gap: 12px;
+}
+
+.audit-state-icon {
+    font-size: 2.2rem;
+}
+
+.audit-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.audit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.83rem;
+    text-align: left;
+}
+
+.audit-table th {
+    position: sticky;
+    top: 0;
+    background: #131c31;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    z-index: 2;
+}
+
+.audit-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    vertical-align: middle;
+}
+
+.audit-table tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.audit-table .col-checkbox {
+    width: 34px;
+    text-align: center;
+}
+
+.audit-file-name {
+    font-weight: 500;
+    color: var(--text-main);
+    word-break: break-all;
+}
+
+.audit-file-meta {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.audit-split-tag {
+    display: inline-block;
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.audit-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.audit-status-badge.uploaded {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.audit-status-badge.missing {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.audit-status-badge.unmatched {
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.audit-dest-select {
+    background: var(--bg-input, #0f172a);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: var(--text-main);
+    font-size: 0.8rem;
+    width: 100%;
+    max-width: 240px;
+    text-overflow: ellipsis;
+}
+
+.audit-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.audit-selection-summary {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.btn-audit-confirm {
+    padding: 8px 20px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border-radius: 6px;
+}
+
+/* Modo claro para Auditoría */
+body.light-theme .btn-audit-folder {
+    background-color: #f0f9ff;
+    border-color: #0284c7;
+    color: #0369a1;
+}
+
+body.light-theme .btn-audit-folder:hover:not(:disabled) {
+    background-color: #e0f2fe;
+    border-color: #0369a1;
+    color: #075985;
+}
+
+body.light-theme .audit-config-bar {
+    background-color: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+body.light-theme .audit-folder-input {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-theme .audit-metric-card {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+body.light-theme .audit-filter-pill {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #475569;
+}
+
+body.light-theme .audit-filter-pill.active {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+    color: #ffffff;
+}
+
+body.light-theme .audit-search-input {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+
+body.light-theme .audit-body {
+    background: #ffffff;
+    border-color: #cbd5e1;
+}
+
+body.light-theme .audit-table th {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+    color: #334155;
+}
+
+body.light-theme .audit-table td {
+    border-color: #e2e8f0;
+}
+
+body.light-theme .audit-table tr:hover {
+    background: #f8fafc;
+}
+
+body.light-theme .audit-dest-select {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #0f172a;
+}
+

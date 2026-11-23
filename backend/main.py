@@ -39,6 +39,11 @@ try:
 except ImportError:
     from updater import check_github_update, download_and_extract_update, schedule_restart
 
+try:
+    from backend.audit import audit_local_folder
+except ImportError:
+    from audit import audit_local_folder
+
 def _load_env():
     base = Path(__file__).resolve().parent
     for candidate in (base.parent / ".env", base / ".env"):
@@ -1962,9 +1967,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.5.0 y Git tiene una etiqueta anterior, NUNCA degradar.
+    # Si VERSION tiene v3.6.0 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.5.0"
+    version = file_version or git_tag_version or "v3.6.0"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -3131,6 +3136,122 @@ async def select_folder():
             log.error("Selector de carpetas: %s", public_error(e))
             raise HTTPException(500, "No se pudo abrir el selector de carpetas")
     return {"folder": folder or ""}
+
+
+@app.post("/api/audit/select_folder")
+async def audit_select_folder():
+    """Abre el selector nativo de carpetas de Windows para elegir la carpeta a auditar."""
+    if dialog_lock.locked():
+        raise HTTPException(409, "Ya hay un selector abierto")
+    async with dialog_lock:
+        try:
+            folder = await asyncio.to_thread(_run_folder_dialog)
+        except Exception as e:
+            log.error("Selector de carpetas para auditoría: %s", public_error(e))
+            raise HTTPException(500, "No se pudo abrir el selector de carpetas")
+    return {"ok": True, "folder": folder or ""}
+
+
+@app.post("/api/audit/scan")
+async def audit_scan(request: Request):
+    """Escanea la carpeta local y devuelve el informe de auditoría frente a Telegram."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "JSON inválido")
+
+    folder = body.get("folder")
+    if not folder or not os.path.isdir(folder):
+        raise HTTPException(400, f"La carpeta '{folder}' no es válida o no existe.")
+
+    recursive = bool(body.get("recursive", True))
+    try:
+        report = await asyncio.to_thread(
+            audit_local_folder,
+            folder,
+            recursive,
+            load_cache(),
+            load_channels()
+        )
+        return {"ok": True, "report": report}
+    except Exception as e:
+        log.error("Error al auditar carpeta %s: %s", folder, e, exc_info=True)
+        raise HTTPException(500, f"Error durante el análisis: {public_error(e)}")
+
+
+@app.post("/api/audit/prepare_queue")
+async def audit_prepare_queue(request: Request):
+    """Convierte los archivos seleccionados de la auditoría al formato de cola de subidas."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "JSON inválido")
+
+    items = body.get("items", [])
+    if not items:
+        return {"ok": True, "queue_items": []}
+
+    queue_items = []
+    for it in items:
+        p = it.get("full_path")
+        if not p or not os.path.isfile(p):
+            continue
+        size = os.path.getsize(p)
+        filename = os.path.basename(p)
+        name_no_ext = os.path.splitext(filename)[0]
+
+        category_id = it.get("categoryId")
+        category_name = it.get("categoryName")
+        topic_id = it.get("topicId")
+        topic_name = it.get("topicName")
+        transformed_name = it.get("transformedName")
+
+        if size > SPLIT_THRESHOLD_BYTES:
+            num_parts = math.ceil(size / SPLIT_THRESHOLD_BYTES)
+            for part_idx in range(1, num_parts + 1):
+                part_start = (part_idx - 1) * SPLIT_THRESHOLD_BYTES
+                part_len = min(SPLIT_THRESHOLD_BYTES, size - part_start)
+                part_id = f"{p}::part{part_idx}"
+
+                if transformed_name:
+                    part_str = f"{part_idx:03d}"
+                    t_name = f"{transformed_name}.{part_str}"
+                else:
+                    t_name = None
+
+                queue_items.append({
+                    "id": part_id,
+                    "name": filename,
+                    "size": part_len,
+                    "totalFileSize": size,
+                    "isPart": True,
+                    "partIndex": part_idx,
+                    "totalParts": num_parts,
+                    "originalBase": name_no_ext,
+                    "fullPath": p,
+                    "categoryId": category_id,
+                    "categoryName": category_name,
+                    "topicId": topic_id,
+                    "topicName": topic_name,
+                    "transformedName": t_name
+                })
+        else:
+            queue_items.append({
+                "id": p,
+                "name": filename,
+                "size": size,
+                "totalFileSize": size,
+                "isPart": False,
+                "originalBase": name_no_ext,
+                "fullPath": p,
+                "categoryId": category_id,
+                "categoryName": category_name,
+                "topicId": topic_id,
+                "topicName": topic_name,
+                "transformedName": transformed_name
+            })
+
+    return {"ok": True, "queue_items": queue_items}
 
 
 @app.get("/api/video_size")

@@ -179,6 +179,11 @@
                                                     <svg class="icon-svg" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="4.5" rx="2"/><polyline points="8 4.5 12 9.5 16 4.5"/><line x1="2" x2="22" y1="9.5" y2="9.5"/></svg>
                                                 </span> <span class="btn-text" data-i18n="uploads.select_videos">Seleccionar vídeo(s)…</span>
                                             </button>
+                                            <button type="button" id="btnAuditFolder" class="btn-secondary btn-audit-folder" title="Auditar carpeta local (eMule/Descargas) contra Telegram" data-i18n-title="audit.btn_tooltip">
+                                                <span class="btn-icon">
+                                                    <svg class="icon-svg" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><circle cx="12" cy="14" r="3"/><path d="m14.5 16.5 2 2"/></svg>
+                                                </span> <span class="btn-text" data-i18n="audit.btn_label">Auditar Carpeta</span>
+                                            </button>
                                             <button type="button" id="btnSubir" class="btn-upload-primary" disabled>
                                                 <span class="btn-icon">
                                                     <svg class="icon-svg" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-2.05 9A22.02 22.02 0 0 1 16 13l-4 2z"/></svg>
@@ -1037,6 +1042,126 @@
                         <div id="updateProgressBar" class="update-progress-bar" style="width: 20%;"></div>
                     </div>
                     <p class="update-progress-warning" data-i18n="modals.updater.installing_desc">Por favor, no cierres esta ventana. La aplicación se recargará automáticamente al finalizar.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Auditoría y Sincronización de Carpeta Local -->
+    <div id="auditModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+        <div class="modal-content modal-audit-content">
+            <div class="modal-channels-header">
+                <div class="modal-update-header-title">
+                    <span class="update-header-icon">🔍</span>
+                    <h3 id="auditModalTitle" data-i18n="audit.modal_title">Auditor de Carpeta Local (eMule / Descargas)</h3>
+                </div>
+                <button type="button" id="btnCloseAuditModal" class="btn-modal-close" title="Cerrar" data-i18n-title="modals.close" aria-label="Cerrar ventana" data-i18n-aria-label="modals.close">✕</button>
+            </div>
+
+            <!-- Selector de carpeta y opciones -->
+            <div class="audit-config-bar">
+                <div class="audit-folder-row">
+                    <label for="inputAuditFolder" class="visually-hidden" data-i18n="audit.select_folder_label">Carpeta a auditar:</label>
+                    <input type="text" id="inputAuditFolder" class="audit-folder-input" placeholder="Selecciona una carpeta del equipo..." data-i18n-placeholder="audit.select_folder_placeholder" readonly>
+                    <button type="button" id="btnBrowseAuditFolder" class="btn-secondary btn-audit-browse">
+                        <span class="btn-icon">📁</span> <span class="btn-text" data-i18n="audit.btn_browse">Examinar...</span>
+                    </button>
+                    <button type="button" id="btnStartAuditScan" class="btn-primary-action btn-audit-scan" disabled>
+                        <span class="btn-icon">⚡</span> <span id="btnStartAuditScanText" class="btn-text" data-i18n="audit.btn_start_scan">Iniciar Auditoría</span>
+                    </button>
+                </div>
+                <div class="audit-options-row">
+                    <label class="checkbox-inline audit-recursive-check" for="checkAuditRecursive">
+                        <input type="checkbox" id="checkAuditRecursive" checked>
+                        <span data-i18n="audit.check_recursive">Escanear subcarpetas recursivamente</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Métricas Resumen -->
+            <div id="auditMetricsGrid" class="audit-metrics-grid hidden">
+                <div class="audit-metric-card metric-total">
+                    <span class="metric-label" data-i18n="audit.metric_total">Total Vídeos</span>
+                    <span id="metricAuditTotal" class="metric-value">0</span>
+                    <span id="metricAuditTotalSize" class="metric-sub">0 MB</span>
+                </div>
+                <div class="audit-metric-card metric-uploaded">
+                    <span class="metric-label" data-i18n="audit.metric_uploaded">Ya en Telegram</span>
+                    <span id="metricAuditUploaded" class="metric-value">0</span>
+                    <span id="metricAuditUploadedSize" class="metric-sub">0 MB</span>
+                </div>
+                <div class="audit-metric-card metric-missing">
+                    <span class="metric-label" data-i18n="audit.metric_missing">Faltan por Subir</span>
+                    <span id="metricAuditMissing" class="metric-value">0</span>
+                    <span id="metricAuditMissingSize" class="metric-sub">0 MB</span>
+                </div>
+            </div>
+
+            <!-- Barra de Filtros y Búsqueda -->
+            <div id="auditToolbar" class="audit-toolbar hidden">
+                <div class="audit-filter-pills">
+                    <button type="button" id="btnAuditFilterMissing" class="audit-filter-pill active" data-filter="missing">
+                        <span data-i18n="audit.filter_missing">Faltan por Subir</span> (<span id="countAuditFilterMissing">0</span>)
+                    </button>
+                    <button type="button" id="btnAuditFilterAll" class="audit-filter-pill" data-filter="all">
+                        <span data-i18n="audit.filter_all">Todos</span> (<span id="countAuditFilterAll">0</span>)
+                    </button>
+                    <button type="button" id="btnAuditFilterUploaded" class="audit-filter-pill" data-filter="uploaded">
+                        <span data-i18n="audit.filter_uploaded">Ya en Telegram</span> (<span id="countAuditFilterUploaded">0</span>)
+                    </button>
+                </div>
+                <div class="audit-search-wrapper">
+                    <input type="text" id="inputAuditSearch" class="audit-search-input" placeholder="Filtrar por nombre de archivo o serie..." data-i18n-placeholder="audit.search_placeholder">
+                </div>
+                <div class="audit-selection-tools">
+                    <button type="button" id="btnAuditSelectAll" class="btn-secondary btn-audit-tool" data-i18n="audit.btn_select_all">Seleccionar todos</button>
+                    <button type="button" id="btnAuditDeselectAll" class="btn-secondary btn-audit-tool" data-i18n="audit.btn_deselect_all">Deseleccionar</button>
+                </div>
+            </div>
+
+            <!-- Cuerpo / Tabla de Resultados -->
+            <div class="audit-body">
+                <!-- Estado Inicial -->
+                <div id="auditEmptyState" class="audit-state-box">
+                    <span class="audit-state-icon">📂</span>
+                    <p data-i18n="audit.initial_desc">Selecciona una carpeta local de tu equipo para auditar tus vídeos contra los canales y temas configurados en Telegram.</p>
+                </div>
+
+                <!-- Estado Cargando -->
+                <div id="auditLoadingState" class="audit-state-box hidden">
+                    <div class="update-spinner"></div>
+                    <p id="auditLoadingText" data-i18n="audit.btn_scanning">Auditando carpeta y comparando con Telegram...</p>
+                </div>
+
+                <!-- Tabla de Resultados -->
+                <div id="auditTableWrapper" class="audit-table-wrapper hidden">
+                    <table class="audit-table">
+                        <thead>
+                            <tr>
+                                <th class="col-checkbox"><input type="checkbox" id="checkAuditSelectAllHeader" title="Seleccionar todos los visibles"></th>
+                                <th class="col-file" data-i18n="audit.th_file">Archivo Local</th>
+                                <th class="col-status" data-i18n="audit.th_status">Estado en Telegram</th>
+                                <th class="col-dest" data-i18n="audit.th_destination">Destino Propuesto</th>
+                                <th class="col-transformed" data-i18n="audit.th_transformed">Nombre Resultante</th>
+                            </tr>
+                        </thead>
+                        <tbody id="auditTableBody">
+                            <!-- Filas dinámicas -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Footer con acciones -->
+            <div class="audit-footer">
+                <div class="audit-footer-left">
+                    <span id="auditSelectionSummary" class="audit-selection-summary">0 archivos seleccionados (0 MB)</span>
+                </div>
+                <div class="audit-footer-actions">
+                    <button type="button" id="btnCancelAuditModal" class="btn-secondary-action" data-i18n="modals.close">Cerrar</button>
+                    <button type="button" id="btnConfirmAuditQueue" class="btn-primary-action btn-audit-confirm" disabled>
+                        <span class="btn-icon">➕</span> <span id="btnConfirmAuditQueueText" class="btn-text" data-i18n="audit.btn_add_to_queue">Añadir a la cola</span>
+                    </button>
                 </div>
             </div>
         </div>

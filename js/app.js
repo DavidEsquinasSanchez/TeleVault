@@ -5140,9 +5140,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 statusBadge.innerHTML = `✓ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_uploaded', 'Ya en Telegram') : 'Ya en Telegram'}`;
                 const destInfo = document.createElement('div');
                 destInfo.className = 'audit-file-meta';
-                const chTitle = item.match ? item.match.channel_title : '';
-                const topTitle = item.match && item.match.topic_title ? ` › ${item.match.topic_title}` : '';
+                const m = item.match || item.telegram_info || item.suggested_destination || {};
+                const chTitle = m.channel_title || m.category_name || '';
+                const topName = m.topic_name || m.topic_title || '';
+                const topTitle = topName ? ` › ${topName}` : '';
                 destInfo.textContent = `${chTitle}${topTitle}`;
+                destInfo.title = `${chTitle}${topTitle}`;
                 tdStatus.append(statusBadge, destInfo);
             } else if (item.suggested_destination) {
                 statusBadge.innerHTML = `⏳ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_missing', 'Falta por subir') : 'Falta por subir'}`;
@@ -5159,8 +5162,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (item.status === 'already_uploaded') {
                 const spanFixed = document.createElement('span');
                 spanFixed.className = 'dest-category-text';
-                const m = item.match;
-                spanFixed.textContent = m ? (m.topic_title ? `${m.channel_title} › ${m.topic_title}` : m.channel_title) : 'Telegram';
+                const m = item.match || item.telegram_info || item.suggested_destination || {};
+                const ch = m.channel_title || m.category_name || 'Telegram';
+                const top = m.topic_name || m.topic_title || '';
+                spanFixed.textContent = top ? `${ch} › ${top}` : ch;
+                spanFixed.title = spanFixed.textContent;
                 tdDest.appendChild(spanFixed);
             } else {
                 const destSelect = document.createElement('select');
@@ -5217,8 +5223,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             // 5. Nombre Resultante
             const tdTrans = document.createElement('td');
             tdTrans.className = 'col-transformed';
-            tdTrans.textContent = item.transformed_name || item.filename;
-            tdTrans.title = item.transformed_name || item.filename;
+            const resultingName = (item.status === 'already_uploaded' && item.match && item.match.video_name)
+                ? item.match.video_name
+                : (item.transformed_name || item.filename);
+            tdTrans.textContent = resultingName;
+            tdTrans.title = resultingName;
 
             tr.append(tdCheck, tdFile, tdStatus, tdDest, tdTrans);
             auditTableBody.appendChild(tr);

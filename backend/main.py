@@ -1967,9 +1967,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.6.1 y Git tiene una etiqueta anterior, NUNCA degradar.
+    # Si VERSION tiene v3.6.2 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.6.1"
+    version = file_version or git_tag_version or "v3.6.2"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)

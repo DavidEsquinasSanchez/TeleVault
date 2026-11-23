@@ -7,6 +7,7 @@ import os
 import re
 import math
 import unicodedata
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -61,6 +62,66 @@ def clean_title(title: str) -> str:
     title = re.sub(r"\b(19\d{2}|20\d{2})\b", " ", title)
     title = re.sub(r"\s+", " ", title).strip(" -_.,")
     return title
+
+
+def is_series_title_match(series_a: str, series_b: str) -> bool:
+    """
+    Comprueba si dos títulos corresponden a la misma serie tolerando diferencias ortográficas,
+    erratas menores (ej: Percy Jackson vs Percy Jacson) y sufijos de temporada.
+    """
+    norm_a = normalize_for_comparison(series_a)
+    norm_b = normalize_for_comparison(series_b)
+    if not norm_a or not norm_b:
+        return False
+    if norm_a == norm_b:
+        return True
+
+    # Quitar sufijos de temporada de ambos lados si están presentes
+    clean_a = re.sub(r"\b(?:temporada|season|temp\.?|t)\s*\d+.*", "", norm_a, flags=re.I).strip()
+    clean_b = re.sub(r"\b(?:temporada|season|temp\.?|t)\s*\d+.*", "", norm_b, flags=re.I).strip()
+
+    if clean_a and clean_b:
+        if clean_a == clean_b:
+            return True
+        if len(clean_a) >= 4 and len(clean_b) >= 4:
+            if clean_a in clean_b or clean_b in clean_a:
+                return True
+        # Comparación difusa (SequenceMatcher) para tolerar erratas
+        ratio = SequenceMatcher(None, clean_a, clean_b).ratio()
+        if ratio >= 0.78:
+            return True
+        # Comparación por conjunto de palabras significativas
+        stop_words = {"los", "las", "del", "por", "para", "con", "una", "uno", "the", "and"}
+        words_a = set(w for w in clean_a.split() if len(w) >= 3 and w not in stop_words)
+        words_b = set(w for w in clean_b.split() if len(w) >= 3 and w not in stop_words)
+        if words_a and words_b:
+            overlap = len(words_a & words_b)
+            if overlap >= max(len(words_a), len(words_b)) * 0.65:
+                return True
+
+    if len(norm_a) >= 4 and len(norm_b) >= 4:
+        if norm_a in norm_b or norm_b in norm_a:
+            return True
+        if SequenceMatcher(None, norm_a, norm_b).ratio() >= 0.78:
+            return True
+
+    return False
+
+
+def is_movie_title_match(movie_a: str, movie_b: str) -> bool:
+    """Comprueba si dos títulos corresponden a la misma película."""
+    norm_a = normalize_for_comparison(movie_a)
+    norm_b = normalize_for_comparison(movie_b)
+    if not norm_a or not norm_b:
+        return False
+    if norm_a == norm_b:
+        return True
+    if len(norm_a) >= 4 and len(norm_b) >= 4:
+        if norm_a in norm_b or norm_b in norm_a:
+            return True
+        if SequenceMatcher(None, norm_a, norm_b).ratio() >= 0.82:
+            return True
+    return False
 
 
 def parse_media_filename(filename: str, parent_folder: str = "") -> Dict[str, Any]:
@@ -179,11 +240,11 @@ def find_telegram_match(
 
                 norm_tname = normalize_for_comparison(tname)
                 # Comprobar si el nombre del tema coincide con la serie y la temporada
-                t_season_match = re.search(r"(?:temporada|temp\.?|t)\s*(\d+)", tname, re.IGNORECASE)
+                t_season_match = re.search(r"(?:temporada|season|temp\.?|t)\s*(\d+)", tname, re.IGNORECASE)
                 t_season = int(t_season_match.group(1)) if t_season_match else None
 
-                # Si coincide el nombre de la serie
-                is_series_match = (norm_series in norm_tname or norm_tname in norm_series) if (norm_series and len(norm_series) >= 3) else False
+                # Comprobar si coincide la serie
+                is_series_match = is_series_title_match(media_info.get("series_name", ""), tname)
 
                 if is_series_match and (t_season is None or t_season == season):
                     best_channel = {"id": ch_id, "title": ch_title}
@@ -219,6 +280,7 @@ def find_telegram_match(
                                 "channel_title": ch_title,
                                 "topic_id": tid_str,
                                 "topic_name": tname,
+                                "topic_title": tname,
                                 "video_name": v_name,
                                 "size": v_size
                             }, None
@@ -228,9 +290,15 @@ def find_telegram_match(
                     best_channel = {"id": ch_id, "title": ch_title}
 
         # Si llegamos aquí, no está en Telegram pero falta subirlo
-        # Construir sugerencia de destino
-        suggested_topic_name = f"{media_info['series_name']} - Temporada {season}"
-        suggested_filename = f"{media_info['series_name']} {season}x{episode:02d}.mp4"
+        # Base de nombre de serie según el tema existente o el nombre detectado
+        topic_series_base = media_info.get("series_name", "")
+        if best_topic and best_topic.get("name"):
+            t_clean = re.sub(r"-\s*(?:temporada|season|temp\.?|t)\s*\d+.*", "", best_topic["name"], flags=re.I).strip()
+            if t_clean:
+                topic_series_base = t_clean
+
+        suggested_topic_name = f"{topic_series_base} - Temporada {season}"
+        suggested_filename = f"{topic_series_base} {season}x{episode:02d}.mp4"
 
         if not best_channel and channels_index.get("forum_channels"):
             # Por defecto el primer canal de series
@@ -263,23 +331,14 @@ def find_telegram_match(
 
                 # Quitar .mp4.001 etc
                 base_vname = re.sub(r"\.(mp4|mkv|avi|mov|webm|m4v|wmv|flv|ts|mpg|mpeg)(?:\.\d{3,4})?$", "", v_name, flags=re.I)
-                norm_v = normalize_for_comparison(base_vname)
 
-                # Coincidencia si el título limpio coincide
-                is_match = False
-                if norm_title and norm_v:
-                    if norm_title == norm_v:
-                        is_match = True
-                    elif len(norm_title) >= 4 and len(norm_v) >= 4:
-                        if norm_title in norm_v or norm_v in norm_title:
-                            is_match = True
-
-                if is_match:
+                if is_movie_title_match(movie_title, base_vname):
                     return True, {
                         "channel_id": ch_id,
                         "channel_title": ch_title,
                         "topic_id": None,
                         "topic_name": None,
+                        "topic_title": None,
                         "video_name": v_name,
                         "size": v_size
                     }, None
@@ -427,23 +486,32 @@ def audit_local_folder(
         if exists:
             already_count += 1
             uploaded_bytes += vid["size"]
-        else:
-            missing_count += 1
-            missing_bytes += vid["size"]
-
-        sugg_dest = None
-        sugg_trans = vid["filename"]
-        if suggestion and suggestion.get("channel_id"):
-            top_id = suggestion.get("topic_id")
+            sugg_trans = (tg_info and tg_info.get("video_name")) or vid["filename"]
+            top_id = tg_info.get("topic_id") if tg_info else None
             if top_id is not None and str(top_id).isdigit():
                 top_id = int(top_id)
             sugg_dest = {
-                "category_id": suggestion["channel_id"],
-                "category_name": suggestion.get("channel_title"),
+                "category_id": tg_info.get("channel_id") if tg_info else None,
+                "category_name": tg_info.get("channel_title") if tg_info else None,
                 "topic_id": top_id,
-                "topic_name": suggestion.get("topic_name")
+                "topic_name": (tg_info.get("topic_name") or tg_info.get("topic_title")) if tg_info else None
             }
-            sugg_trans = suggestion.get("suggested_filename") or vid["filename"]
+        else:
+            missing_count += 1
+            missing_bytes += vid["size"]
+            sugg_dest = None
+            sugg_trans = vid["filename"]
+            if suggestion and suggestion.get("channel_id"):
+                top_id = suggestion.get("topic_id")
+                if top_id is not None and str(top_id).isdigit():
+                    top_id = int(top_id)
+                sugg_dest = {
+                    "category_id": suggestion["channel_id"],
+                    "category_name": suggestion.get("channel_title"),
+                    "topic_id": top_id,
+                    "topic_name": suggestion.get("topic_name")
+                }
+                sugg_trans = suggestion.get("suggested_filename") or vid["filename"]
 
         items.append({
             "id": re.sub(r"[^a-zA-Z0-9_-]", "_", vid["full_path"]),

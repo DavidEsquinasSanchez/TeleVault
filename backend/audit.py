@@ -341,41 +341,64 @@ def audit_local_folder(
 
     # 2. Recorrer archivos locales
     found_videos = []
-    pattern_mode = "**/*" if recursive else "*"
+    str_folder = str(folder)
     try:
-        iterator = folder.rglob("*") if recursive else folder.glob("*")
-        for p in iterator:
+        if recursive:
+            for root, dirs, files in os.walk(str_folder):
+                # Descartar carpetas ocultas o de sistema
+                dirs[:] = [d for d in dirs if not d.startswith((".", "~$", "$RECYCLE", "System Volume Information"))]
+                for fname in files:
+                    ext = os.path.splitext(fname)[1].lower()
+                    if ext in IGNORE_EXTENSIONS or ext not in VIDEO_EXTENSIONS:
+                        continue
+                    if fname.startswith((".", "~$")):
+                        continue
+                    full_p = os.path.join(root, fname)
+                    try:
+                        size = os.path.getsize(full_p)
+                        if size < 100 * 1024:
+                            continue
+                        rel_path = os.path.relpath(full_p, str_folder)
+                        parent_name = os.path.basename(root)
+                        media_info = parse_media_filename(fname, parent_name)
+                        found_videos.append({
+                            "full_path": full_p,
+                            "filename": fname,
+                            "rel_path": rel_path,
+                            "size": size,
+                            "media_info": media_info
+                        })
+                    except Exception:
+                        continue
+        else:
             try:
-                if not p.is_file():
-                    continue
-                ext = p.suffix.lower()
-                # Filtrar temporales y no vídeos
-                if ext in IGNORE_EXTENSIONS or ext not in VIDEO_EXTENSIONS:
-                    continue
-                # Evitar archivos ocultos o de sistema
-                if p.name.startswith((".", "~$")):
-                    continue
-
-                size = p.stat().st_size
-                # Ignorar archivos vacíos o fragmentos menores a 100 KB
-                if size < 100 * 1024:
-                    continue
-
-                rel_path = str(p.relative_to(folder))
-                parent_name = p.parent.name
-                media_info = parse_media_filename(p.name, parent_name)
-
-                found_videos.append({
-                    "full_path": str(p),
-                    "filename": p.name,
-                    "rel_path": rel_path,
-                    "size": size,
-                    "media_info": media_info
-                })
+                for fname in os.listdir(str_folder):
+                    full_p = os.path.join(str_folder, fname)
+                    try:
+                        if not os.path.isfile(full_p):
+                            continue
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext in IGNORE_EXTENSIONS or ext not in VIDEO_EXTENSIONS:
+                            continue
+                        if fname.startswith((".", "~$")):
+                            continue
+                        size = os.path.getsize(full_p)
+                        if size < 100 * 1024:
+                            continue
+                        media_info = parse_media_filename(fname, os.path.basename(str_folder))
+                        found_videos.append({
+                            "full_path": full_p,
+                            "filename": fname,
+                            "rel_path": fname,
+                            "size": size,
+                            "media_info": media_info
+                        })
+                    except Exception:
+                        continue
             except Exception:
-                continue
+                pass
     except Exception as e:
-        raise RuntimeError(f"Error al escanear la carpeta '{folder_path}': {str(e)}")
+        log.warning("Error al escanear la carpeta '%s': %s", folder_path, e)
 
     # 3. Comparar cada archivo con el catálogo de Telegram
     items = []

@@ -4831,6 +4831,595 @@ document.addEventListener('DOMContentLoaded', async () => {
                 downloadTopicModal.classList.add('hidden');
                 pendingTopicDownload = null;
             }
+            if (auditModal && !auditModal.classList.contains('hidden')) {
+                closeAuditModal();
+                return;
+            }
+        }
+    });
+
+    // =========================================================================
+    // AUDITOR Y SINCRONIZADOR DE CARPETA LOCAL (eMule / Descargas)
+    // =========================================================================
+    const btnAuditFolder = document.getElementById('btnAuditFolder');
+    const auditModal = document.getElementById('auditModal');
+    const btnCloseAuditModal = document.getElementById('btnCloseAuditModal');
+    const btnCancelAuditModal = document.getElementById('btnCancelAuditModal');
+    const inputAuditFolder = document.getElementById('inputAuditFolder');
+    const btnBrowseAuditFolder = document.getElementById('btnBrowseAuditFolder');
+    const checkAuditRecursive = document.getElementById('checkAuditRecursive');
+    const btnStartAuditScan = document.getElementById('btnStartAuditScan');
+    const btnStartAuditScanText = document.getElementById('btnStartAuditScanText');
+
+    const auditMetricsGrid = document.getElementById('auditMetricsGrid');
+    const metricAuditTotal = document.getElementById('metricAuditTotal');
+    const metricAuditTotalSize = document.getElementById('metricAuditTotalSize');
+    const metricAuditUploaded = document.getElementById('metricAuditUploaded');
+    const metricAuditUploadedSize = document.getElementById('metricAuditUploadedSize');
+    const metricAuditMissing = document.getElementById('metricAuditMissing');
+    const metricAuditMissingSize = document.getElementById('metricAuditMissingSize');
+
+    const auditToolbar = document.getElementById('auditToolbar');
+    const btnAuditFilterMissing = document.getElementById('btnAuditFilterMissing');
+    const btnAuditFilterAll = document.getElementById('btnAuditFilterAll');
+    const btnAuditFilterUploaded = document.getElementById('btnAuditFilterUploaded');
+    const countAuditFilterMissing = document.getElementById('countAuditFilterMissing');
+    const countAuditFilterAll = document.getElementById('countAuditFilterAll');
+    const countAuditFilterUploaded = document.getElementById('countAuditFilterUploaded');
+    const inputAuditSearch = document.getElementById('inputAuditSearch');
+    const btnAuditSelectAll = document.getElementById('btnAuditSelectAll');
+    const btnAuditDeselectAll = document.getElementById('btnAuditDeselectAll');
+    const checkAuditSelectAllHeader = document.getElementById('checkAuditSelectAllHeader');
+
+    const auditEmptyState = document.getElementById('auditEmptyState');
+    const auditLoadingState = document.getElementById('auditLoadingState');
+    const auditTableWrapper = document.getElementById('auditTableWrapper');
+    const auditTableBody = document.getElementById('auditTableBody');
+
+    const auditSelectionSummary = document.getElementById('auditSelectionSummary');
+    const btnConfirmAuditQueue = document.getElementById('btnConfirmAuditQueue');
+    const btnConfirmAuditQueueText = document.getElementById('btnConfirmAuditQueueText');
+
+    let currentAuditReport = null;
+    let auditCurrentFilter = 'missing'; // 'missing' | 'all' | 'uploaded'
+    let auditSearchQuery = '';
+    const selectedAuditFiles = new Set();
+    let isAuditing = false;
+
+    function openAuditModal() {
+        if (!auditModal) return;
+        const lastFolder = localStorage.getItem('televault_last_audit_folder');
+        if (lastFolder && inputAuditFolder) {
+            inputAuditFolder.value = lastFolder;
+            if (btnStartAuditScan) btnStartAuditScan.disabled = false;
+        }
+        auditModal.classList.remove('hidden');
+    }
+
+    function closeAuditModal() {
+        if (!auditModal) return;
+        auditModal.classList.add('hidden');
+    }
+
+    async function handleBrowseAuditFolder() {
+        try {
+            const path = await window.TelegramAPI.selectAuditFolder();
+            if (path && typeof path === 'string' && path.trim()) {
+                inputAuditFolder.value = path.trim();
+                localStorage.setItem('televault_last_audit_folder', path.trim());
+                if (btnStartAuditScan) btnStartAuditScan.disabled = false;
+            }
+        } catch (err) {
+            addLog(window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.error_select_folder', err.message, { error: err.message }) : `Error al seleccionar carpeta: ${err.message}`, 'error');
+        }
+    }
+
+    async function runAuditScan() {
+        const folder = inputAuditFolder ? inputAuditFolder.value.trim() : '';
+        if (!folder) return;
+
+        isAuditing = true;
+        if (btnStartAuditScan) btnStartAuditScan.disabled = true;
+        if (btnBrowseAuditFolder) btnBrowseAuditFolder.disabled = true;
+        if (btnStartAuditScanText) {
+            btnStartAuditScanText.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.btn_scanning', 'Auditando...') : 'Auditando...';
+        }
+
+        if (auditEmptyState) auditEmptyState.classList.add('hidden');
+        if (auditTableWrapper) auditTableWrapper.classList.add('hidden');
+        if (auditMetricsGrid) auditMetricsGrid.classList.add('hidden');
+        if (auditToolbar) auditToolbar.classList.add('hidden');
+        if (auditLoadingState) auditLoadingState.classList.remove('hidden');
+
+        try {
+            const recursive = checkAuditRecursive ? checkAuditRecursive.checked : true;
+            const res = await window.TelegramAPI.scanAuditFolder(folder, recursive);
+
+            if (res && res.ok && res.report) {
+                currentAuditReport = res.report;
+                selectedAuditFiles.clear();
+
+                // Por defecto, preseleccionar los vídeos que faltan por subir y tienen destino sugerido
+                for (const it of currentAuditReport.items || []) {
+                    if (it.status === 'missing' && it.suggested_destination) {
+                        selectedAuditFiles.add(it.full_path);
+                    }
+                }
+
+                // Actualizar métricas
+                const sum = currentAuditReport.summary;
+                if (metricAuditTotal) metricAuditTotal.textContent = sum.total_files;
+                if (metricAuditTotalSize) metricAuditTotalSize.textContent = window.TelegramAPI.formatBytes(sum.total_size);
+                if (metricAuditUploaded) metricAuditUploaded.textContent = sum.uploaded_files;
+                if (metricAuditUploadedSize) metricAuditUploadedSize.textContent = window.TelegramAPI.formatBytes(sum.uploaded_size);
+                if (metricAuditMissing) metricAuditMissing.textContent = sum.missing_files;
+                if (metricAuditMissingSize) metricAuditMissingSize.textContent = window.TelegramAPI.formatBytes(sum.missing_size);
+
+                // Contadores en pestañas de filtro
+                if (countAuditFilterMissing) countAuditFilterMissing.textContent = sum.missing_files;
+                if (countAuditFilterAll) countAuditFilterAll.textContent = sum.total_files;
+                if (countAuditFilterUploaded) countAuditFilterUploaded.textContent = sum.uploaded_files;
+
+                // Mostrar controles
+                if (auditMetricsGrid) auditMetricsGrid.classList.remove('hidden');
+                if (auditToolbar) auditToolbar.classList.remove('hidden');
+                if (auditTableWrapper) auditTableWrapper.classList.remove('hidden');
+
+                // Si no hay archivos faltantes pero sí subidos, poner filtro en 'all'
+                if (sum.missing_files === 0 && sum.total_files > 0) {
+                    setAuditFilter('all');
+                } else {
+                    setAuditFilter('missing');
+                }
+
+                renderAuditTable();
+                updateAuditFooterSummary();
+            } else {
+                throw new Error((res && res.error) || 'Error desconocido al auditar la carpeta');
+            }
+        } catch (err) {
+            addLog(window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.error_scan', err.message, { error: err.message }) : `Error durante la auditoría: ${err.message}`, 'error');
+            if (auditEmptyState) {
+                auditEmptyState.classList.remove('hidden');
+                const p = auditEmptyState.querySelector('p');
+                if (p) p.textContent = `Error: ${err.message}`;
+            }
+        } finally {
+            isAuditing = false;
+            if (auditLoadingState) auditLoadingState.classList.add('hidden');
+            if (btnStartAuditScan) btnStartAuditScan.disabled = false;
+            if (btnBrowseAuditFolder) btnBrowseAuditFolder.disabled = false;
+            if (btnStartAuditScanText) {
+                btnStartAuditScanText.textContent = window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.btn_rescan', 'Reescanear') : 'Reescanear';
+            }
+        }
+    }
+
+    function setAuditFilter(filter) {
+        auditCurrentFilter = filter;
+        if (btnAuditFilterMissing) btnAuditFilterMissing.classList.toggle('active', filter === 'missing');
+        if (btnAuditFilterAll) btnAuditFilterAll.classList.toggle('active', filter === 'all');
+        if (btnAuditFilterUploaded) btnAuditFilterUploaded.classList.toggle('active', filter === 'uploaded');
+        renderAuditTable();
+    }
+
+    function buildDestinationOptionsHtml(selectedCategoryId, selectedTopicId) {
+        const placeholder = window.TeleVaultI18n
+            ? window.TeleVaultI18n.t('audit.dest_unassigned', '-- Asignar destino manualmente --')
+            : '-- Asignar destino manualmente --';
+        let html = `<option value="">${placeholder}</option>`;
+
+        for (const group of telegramData) {
+            if (group.visible === false) continue;
+            if (group.tieneTemas && Array.isArray(group.temas)) {
+                for (const topic of group.temas) {
+                    const val = `${group.id}:::${topic.id}`;
+                    const isSelected = (String(selectedCategoryId) === String(group.id) && String(selectedTopicId) === String(topic.id));
+                    html += `<option value="${val}" ${isSelected ? 'selected' : ''}>📂 ${group.nombre} › ${topic.nombre}</option>`;
+                }
+            } else {
+                const val = `${group.id}:::null`;
+                const isSelected = (String(selectedCategoryId) === String(group.id) && (!selectedTopicId || selectedTopicId === 'null'));
+                html += `<option value="${val}" ${isSelected ? 'selected' : ''}>📢 ${group.nombre}</option>`;
+            }
+        }
+        return html;
+    }
+
+    function renderAuditTable() {
+        if (!auditTableBody) return;
+        auditTableBody.innerHTML = '';
+
+        if (!currentAuditReport || !Array.isArray(currentAuditReport.items) || currentAuditReport.items.length === 0) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td colspan="5" style="text-align:center; padding: 30px; color: var(--text-muted);">${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.no_files_found', 'No se encontraron vídeos.') : 'No se encontraron vídeos.'}</td>`;
+            auditTableBody.appendChild(tr);
+            if (checkAuditSelectAllHeader) checkAuditSelectAllHeader.checked = false;
+            updateAuditFooterSummary();
+            return;
+        }
+
+        const query = (auditSearchQuery || '').toLowerCase().trim();
+        const filtered = currentAuditReport.items.filter(it => {
+            if (auditCurrentFilter === 'missing' && it.status !== 'missing') return false;
+            if (auditCurrentFilter === 'uploaded' && it.status !== 'already_uploaded') return false;
+
+            if (query) {
+                const matchName = (it.filename || '').toLowerCase().includes(query);
+                const matchRel = (it.relative_path || '').toLowerCase().includes(query);
+                const matchTrans = (it.transformed_name || '').toLowerCase().includes(query);
+                const matchCat = (it.suggested_destination && it.suggested_destination.category_name || '').toLowerCase().includes(query);
+                const matchTop = (it.suggested_destination && it.suggested_destination.topic_name || '').toLowerCase().includes(query);
+                return matchName || matchRel || matchTrans || matchCat || matchTop;
+            }
+            return true;
+        });
+
+        if (filtered.length === 0) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td colspan="5" style="text-align:center; padding: 25px; color: var(--text-muted);">Sin vídeos que coincidan con el filtro actual.</td>`;
+            auditTableBody.appendChild(tr);
+            if (checkAuditSelectAllHeader) checkAuditSelectAllHeader.checked = false;
+            updateAuditFooterSummary();
+            return;
+        }
+
+        // Orden natural: primero los faltantes por subir, luego subidos
+        filtered.sort((a, b) => {
+            if (a.status !== b.status) {
+                return a.status === 'missing' ? -1 : 1;
+            }
+            return naturalCompare(a.relative_path || a.filename || '', b.relative_path || b.filename || '');
+        });
+
+        filtered.forEach(item => {
+            const tr = document.createElement('tr');
+
+            // 1. Checkbox
+            const tdCheck = document.createElement('td');
+            tdCheck.className = 'col-checkbox';
+            const chk = document.createElement('input');
+            chk.type = 'checkbox';
+            chk.className = 'audit-item-check';
+            const isUploaded = (item.status === 'already_uploaded');
+            chk.checked = selectedAuditFiles.has(item.full_path);
+            chk.disabled = isUploaded;
+            if (isUploaded) {
+                chk.title = 'Ya subido a Telegram';
+            }
+            chk.addEventListener('change', () => {
+                if (chk.checked) {
+                    selectedAuditFiles.add(item.full_path);
+                } else {
+                    selectedAuditFiles.delete(item.full_path);
+                }
+                syncHeaderAuditCheckbox(filtered);
+                updateAuditFooterSummary();
+            });
+            tdCheck.appendChild(chk);
+
+            // 2. Archivo Local
+            const tdFile = document.createElement('td');
+            tdFile.className = 'col-file';
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'audit-file-name';
+            nameDiv.textContent = item.filename;
+            nameDiv.title = item.full_path;
+
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'audit-file-meta';
+            const sizeStr = window.TelegramAPI.formatBytes(item.size);
+            metaDiv.innerHTML = `<span>${sizeStr}</span> • <span>${item.relative_path}</span>`;
+
+            if (item.size > 1950 * 1024 * 1024) {
+                const parts = Math.ceil(item.size / (1950 * 1024 * 1024));
+                const splitTag = document.createElement('span');
+                splitTag.className = 'audit-split-tag';
+                splitTag.textContent = `✂️ ${parts} partes`;
+                splitTag.title = `El archivo supera 1.95 GB. Se dividirá automáticamente en ${parts} partes para Telegram.`;
+                metaDiv.appendChild(splitTag);
+            }
+            tdFile.append(nameDiv, metaDiv);
+
+            // 3. Estado en Telegram
+            const tdStatus = document.createElement('td');
+            tdStatus.className = 'col-status';
+            const statusBadge = document.createElement('span');
+            statusBadge.className = `audit-status-badge ${item.status === 'already_uploaded' ? 'uploaded' : (item.suggested_destination ? 'missing' : 'unmatched')}`;
+
+            if (item.status === 'already_uploaded') {
+                statusBadge.innerHTML = `✓ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_uploaded', 'Ya en Telegram') : 'Ya en Telegram'}`;
+                const destInfo = document.createElement('div');
+                destInfo.className = 'audit-file-meta';
+                const chTitle = item.match ? item.match.channel_title : '';
+                const topTitle = item.match && item.match.topic_title ? ` › ${item.match.topic_title}` : '';
+                destInfo.textContent = `${chTitle}${topTitle}`;
+                tdStatus.append(statusBadge, destInfo);
+            } else if (item.suggested_destination) {
+                statusBadge.innerHTML = `⏳ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_missing', 'Falta por subir') : 'Falta por subir'}`;
+                tdStatus.appendChild(statusBadge);
+            } else {
+                statusBadge.innerHTML = `❓ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_no_dest', 'Sin destino') : 'Sin destino'}`;
+                tdStatus.appendChild(statusBadge);
+            }
+
+            // 4. Destino Propuesto
+            const tdDest = document.createElement('td');
+            tdDest.className = 'col-dest';
+
+            if (item.status === 'already_uploaded') {
+                const spanFixed = document.createElement('span');
+                spanFixed.className = 'dest-category-text';
+                const m = item.match;
+                spanFixed.textContent = m ? (m.topic_title ? `${m.channel_title} › ${m.topic_title}` : m.channel_title) : 'Telegram';
+                tdDest.appendChild(spanFixed);
+            } else {
+                const destSelect = document.createElement('select');
+                destSelect.className = 'audit-dest-select';
+                const curCat = item.suggested_destination ? item.suggested_destination.category_id : null;
+                const curTop = item.suggested_destination ? item.suggested_destination.topic_id : null;
+                destSelect.innerHTML = buildDestinationOptionsHtml(curCat, curTop);
+
+                destSelect.addEventListener('change', () => {
+                    const val = destSelect.value;
+                    if (val) {
+                        const parts = val.split(':::');
+                        const catId = parts[0];
+                        const topId = (parts[1] && parts[1] !== 'null') ? parseInt(parts[1], 10) : null;
+                        const grp = telegramData.find(g => String(g.id) === String(catId));
+                        let catTitle = grp ? grp.nombre : '';
+                        let topTitle = null;
+                        if (topId && grp && Array.isArray(grp.temas)) {
+                            const tp = grp.temas.find(t => String(t.id) === String(topId));
+                            if (tp) topTitle = tp.nombre;
+                        }
+
+                        item.suggested_destination = {
+                            category_id: catId,
+                            category_name: catTitle,
+                            topic_id: topId,
+                            topic_name: topTitle
+                        };
+
+                        // Recalcular nombre transformado con la nueva asignación
+                        const newTrans = getTransformedName({
+                            name: item.filename,
+                            originalBase: item.filename.replace(/\.[^/.]+$/, '')
+                        }, catId, topId);
+                        item.transformed_name = newTrans || item.filename;
+
+                        statusBadge.className = 'audit-status-badge missing';
+                        statusBadge.innerHTML = `⏳ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_missing', 'Falta por subir') : 'Falta por subir'}`;
+                    } else {
+                        item.suggested_destination = null;
+                        item.transformed_name = item.filename;
+                        statusBadge.className = 'audit-status-badge unmatched';
+                        statusBadge.innerHTML = `❓ ${window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.status_no_dest', 'Sin destino') : 'Sin destino'}`;
+                    }
+
+                    // Actualizar celda de nombre transformado
+                    tdTrans.textContent = item.transformed_name || item.filename;
+                    tdTrans.title = item.transformed_name || item.filename;
+                    updateAuditFooterSummary();
+                });
+                tdDest.appendChild(destSelect);
+            }
+
+            // 5. Nombre Resultante
+            const tdTrans = document.createElement('td');
+            tdTrans.className = 'col-transformed';
+            tdTrans.textContent = item.transformed_name || item.filename;
+            tdTrans.title = item.transformed_name || item.filename;
+
+            tr.append(tdCheck, tdFile, tdStatus, tdDest, tdTrans);
+            auditTableBody.appendChild(tr);
+        });
+
+        syncHeaderAuditCheckbox(filtered);
+        updateAuditFooterSummary();
+    }
+
+    function syncHeaderAuditCheckbox(filteredItems) {
+        if (!checkAuditSelectAllHeader) return;
+        const selectable = (filteredItems || []).filter(it => it.status !== 'already_uploaded');
+        if (selectable.length === 0) {
+            checkAuditSelectAllHeader.checked = false;
+            checkAuditSelectAllHeader.disabled = true;
+            return;
+        }
+        checkAuditSelectAllHeader.disabled = false;
+        const allSelected = selectable.every(it => selectedAuditFiles.has(it.full_path));
+        checkAuditSelectAllHeader.checked = allSelected;
+    }
+
+    function updateAuditFooterSummary() {
+        const count = selectedAuditFiles.size;
+        let totalBytes = 0;
+        if (currentAuditReport && Array.isArray(currentAuditReport.items)) {
+            for (const it of currentAuditReport.items) {
+                if (selectedAuditFiles.has(it.full_path)) {
+                    totalBytes += (it.size || 0);
+                }
+            }
+        }
+
+        const sizeStr = window.TelegramAPI.formatBytes(totalBytes);
+        if (auditSelectionSummary) {
+            auditSelectionSummary.textContent = window.TeleVaultI18n
+                ? window.TeleVaultI18n.t('audit.summary_selected', `${count} archivos seleccionados (${sizeStr})`, { count: count, size: sizeStr })
+                : `${count} archivos seleccionados (${sizeStr})`;
+        }
+
+        if (btnConfirmAuditQueue) {
+            btnConfirmAuditQueue.disabled = (count === 0);
+        }
+        if (btnConfirmAuditQueueText) {
+            btnConfirmAuditQueueText.textContent = window.TeleVaultI18n
+                ? (count > 0 ? window.TeleVaultI18n.t('audit.btn_add_to_queue', `Añadir a la cola (${count})`, { count: count }) : window.TeleVaultI18n.t('audit.btn_add_to_queue_zero', 'Añadir a la cola'))
+                : (count > 0 ? `Añadir a la cola (${count})` : 'Añadir a la cola');
+        }
+    }
+
+    function selectAllAuditItems(visibleOnly = true) {
+        if (!currentAuditReport || !Array.isArray(currentAuditReport.items)) return;
+        const query = (auditSearchQuery || '').toLowerCase().trim();
+        const itemsToProcess = visibleOnly
+            ? currentAuditReport.items.filter(it => {
+                if (auditCurrentFilter === 'missing' && it.status !== 'missing') return false;
+                if (auditCurrentFilter === 'uploaded' && it.status !== 'already_uploaded') return false;
+                if (query) {
+                    const matchName = (it.filename || '').toLowerCase().includes(query);
+                    const matchRel = (it.relative_path || '').toLowerCase().includes(query);
+                    const matchTrans = (it.transformed_name || '').toLowerCase().includes(query);
+                    return matchName || matchRel || matchTrans;
+                }
+                return true;
+            })
+            : currentAuditReport.items;
+
+        for (const it of itemsToProcess) {
+            if (it.status !== 'already_uploaded') {
+                selectedAuditFiles.add(it.full_path);
+            }
+        }
+        renderAuditTable();
+    }
+
+    function deselectAllAuditItems() {
+        selectedAuditFiles.clear();
+        renderAuditTable();
+    }
+
+    async function handleConfirmAuditQueue() {
+        if (!currentAuditReport || !Array.isArray(currentAuditReport.items)) return;
+        const selected = currentAuditReport.items.filter(it => selectedAuditFiles.has(it.full_path));
+        if (selected.length === 0) return;
+
+        const unassigned = selected.filter(it => !it.suggested_destination || !it.suggested_destination.category_id);
+        if (unassigned.length > 0) {
+            addLog(`Hay ${unassigned.length} archivo(s) seleccionados sin canal de destino asignado. Asígnales un canal antes de añadirlos.`, 'warning');
+            return;
+        }
+
+        btnConfirmAuditQueue.disabled = true;
+        const origText = btnConfirmAuditQueueText ? btnConfirmAuditQueueText.textContent : '';
+        if (btnConfirmAuditQueueText) btnConfirmAuditQueueText.textContent = 'Añadiendo a la cola...';
+
+        try {
+            const payload = selected.map(it => ({
+                full_path: it.full_path,
+                categoryId: it.suggested_destination.category_id,
+                categoryName: it.suggested_destination.category_name,
+                topicId: it.suggested_destination.topic_id,
+                topicName: it.suggested_destination.topic_name,
+                transformedName: it.transformed_name || it.filename
+            }));
+
+            const res = await window.TelegramAPI.prepareAuditQueue(payload);
+            if (res && res.ok && Array.isArray(res.queue_items)) {
+                let addedCount = 0;
+                for (const item of res.queue_items) {
+                    if (filesToUpload.some(f => f.id === item.id)) continue;
+                    const displayName = item.isPart
+                        ? `${item.name} (Parte ${item.partIndex}/${item.totalParts})`
+                        : item.name;
+                    const destLabel = item.topicName ? `${item.categoryName} > ${item.topicName}` : item.categoryName;
+
+                    filesToUpload.push({
+                        id: item.id,
+                        size: item.size || 0,
+                        totalFileSize: item.totalFileSize || item.size || 0,
+                        originalName: displayName,
+                        transformedName: item.transformedName || displayName,
+                        categoryId: item.categoryId,
+                        categoryName: item.categoryName,
+                        topicId: item.topicId,
+                        topicName: item.topicName,
+                        destinationLabel: destLabel,
+                        status: 'Pendiente Subir',
+                        isPart: item.isPart || false,
+                        partIndex: item.partIndex,
+                        totalParts: item.totalParts,
+                        rawItem: item,
+                        isCustom: false,
+                        percent: 0,
+                        eta: null,
+                        speed: null
+                    });
+                    addedCount++;
+                }
+
+                validateForm();
+                renderTable();
+                checkUploadButtonState();
+                updateBadges();
+
+                const logMsg = window.TeleVaultI18n
+                    ? window.TeleVaultI18n.t('audit.added_log', `Se han añadido ${addedCount} archivo(s) desde la auditoría a la cola de subidas.`, { count: addedCount })
+                    : `Se han añadido ${addedCount} archivo(s) desde la auditoría a la cola de subidas.`;
+                addLog(logMsg, 'info');
+
+                switchTab('uploads');
+                closeAuditModal();
+            } else {
+                throw new Error((res && res.error) || 'Respuesta inválida del servidor');
+            }
+        } catch (err) {
+            addLog(window.TeleVaultI18n ? window.TeleVaultI18n.t('audit.error_queue', err.message, { error: err.message }) : `Error al añadir archivos a la cola: ${err.message}`, 'error');
+        } finally {
+            btnConfirmAuditQueue.disabled = false;
+            if (btnConfirmAuditQueueText) btnConfirmAuditQueueText.textContent = origText;
+        }
+    }
+
+    // Eventos del Auditor
+    if (btnAuditFolder) btnAuditFolder.addEventListener('click', openAuditModal);
+    if (btnCloseAuditModal) btnCloseAuditModal.addEventListener('click', closeAuditModal);
+    if (btnCancelAuditModal) btnCancelAuditModal.addEventListener('click', closeAuditModal);
+    if (btnBrowseAuditFolder) btnBrowseAuditFolder.addEventListener('click', handleBrowseAuditFolder);
+    if (btnStartAuditScan) btnStartAuditScan.addEventListener('click', runAuditScan);
+
+    if (auditModal) {
+        auditModal.addEventListener('click', (e) => {
+            if (e.target === auditModal && !isAuditing) closeAuditModal();
+        });
+    }
+
+    if (btnAuditFilterMissing) btnAuditFilterMissing.addEventListener('click', () => setAuditFilter('missing'));
+    if (btnAuditFilterAll) btnAuditFilterAll.addEventListener('click', () => setAuditFilter('all'));
+    if (btnAuditFilterUploaded) btnAuditFilterUploaded.addEventListener('click', () => setAuditFilter('uploaded'));
+
+    if (inputAuditSearch) {
+        inputAuditSearch.addEventListener('input', () => {
+            auditSearchQuery = inputAuditSearch.value;
+            renderAuditTable();
+        });
+    }
+
+    if (btnAuditSelectAll) {
+        btnAuditSelectAll.addEventListener('click', () => selectAllAuditItems(true));
+    }
+    if (btnAuditDeselectAll) {
+        btnAuditDeselectAll.addEventListener('click', deselectAllAuditItems);
+    }
+    if (checkAuditSelectAllHeader) {
+        checkAuditSelectAllHeader.addEventListener('change', () => {
+            if (checkAuditSelectAllHeader.checked) {
+                selectAllAuditItems(true);
+            } else {
+                deselectAllAuditItems();
+            }
+        });
+    }
+
+    if (btnConfirmAuditQueue) {
+        btnConfirmAuditQueue.addEventListener('click', handleConfirmAuditQueue);
+    }
+
+    window.addEventListener('televault:langchange', () => {
+        if (currentAuditReport) {
+            renderAuditTable();
+            updateAuditFooterSummary();
         }
     });
 

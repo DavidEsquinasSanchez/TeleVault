@@ -235,6 +235,38 @@ const TelegramAPI = {
         return data.folder || '';
     },
 
+    // Selector de carpeta para la auditoría y sincronización local
+    async selectAuditFolder() {
+        const response = await apiFetch('/audit/select_folder', { method: 'POST' });
+        if (!response.ok) throw new Error(await readError(response));
+        const data = await response.json();
+        return data.folder || '';
+    },
+
+    // Ejecuta el análisis de una carpeta local frente a Telegram
+    async scanAuditFolder(folder, recursive = true) {
+        const response = await apiFetch('/audit/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ folder, recursive })
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const data = await response.json();
+        return data.report || null;
+    },
+
+    // Prepara los elementos seleccionados de la auditoría para la cola de subidas
+    async prepareAuditQueue(items) {
+        const response = await apiFetch('/audit/prepare_queue', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items })
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const data = await response.json();
+        return data.queue_items || [];
+    },
+
     // Obtiene la configuración de orden personalizado del sidebar
     async getSidebarOrder() {
         try {

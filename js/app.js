@@ -3606,7 +3606,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                         const targetCat = next.categoryId || defaultCategoryId;
                         const targetTop = next.topicId !== undefined ? next.topicId : defaultTopicId;
-                        const grupo = telegramData.find(g => g.id === targetCat);
+                        const grupo = telegramData.find(g => String(g.id) === String(targetCat));
                         const isTopic = Boolean(targetTop || (grupo && grupo.tieneTemas));
 
                         if (isTopic) {
@@ -5344,14 +5344,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (queueItems.length > 0) {
                 let addedCount = 0;
                 for (const item of queueItems) {
-                    if (filesToUpload.some(f => f.id === item.id)) continue;
+                    const isAlreadyInQueue = filesToUpload.some(f =>
+                        f.id === item.id ||
+                        (f.fullPath && f.fullPath === item.fullPath && (!item.isPart || f.partIndex === item.partIndex)) ||
+                        (f.rawItem && f.rawItem.fullPath === item.fullPath && (!item.isPart || f.partIndex === item.partIndex))
+                    );
+                    if (isAlreadyInQueue) continue;
+
                     const displayName = item.isPart
                         ? `${item.name} (Parte ${item.partIndex}/${item.totalParts})`
                         : item.name;
-                    const destLabel = item.topicName ? `${item.categoryName} > ${item.topicName}` : item.categoryName;
+                    const destLabel = item.topicName ? `${item.categoryName} › ${item.topicName}` : item.categoryName;
 
                     filesToUpload.push({
                         id: item.id,
+                        fullPath: item.fullPath,
                         size: item.size || 0,
                         totalFileSize: item.totalFileSize || item.size || 0,
                         originalName: displayName,

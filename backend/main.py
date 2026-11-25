@@ -1967,9 +1967,9 @@ def get_app_version_info() -> dict:
         log.debug("No se pudo leer versión de git: %s", e)
 
     # 3. Determinar la versión sin degradación:
-    # Si VERSION tiene v3.6.2 y Git tiene una etiqueta anterior, NUNCA degradar.
+    # Si VERSION tiene v3.6.3 y Git tiene una etiqueta anterior, NUNCA degradar.
     # Se elige la versión más alta detectada entre archivo VERSION y etiquetas Git.
-    version = file_version or git_tag_version or "v3.6.2"
+    version = file_version or git_tag_version or "v3.6.3"
     if file_version and git_tag_version:
         t_file = parse_version_tuple(file_version)
         t_git = parse_version_tuple(git_tag_version)
@@ -3209,9 +3209,20 @@ async def audit_prepare_queue(request: Request):
         if size > SPLIT_THRESHOLD_BYTES:
             num_parts = math.ceil(size / SPLIT_THRESHOLD_BYTES)
             for part_idx in range(1, num_parts + 1):
+                part_id = uuid.uuid4().hex
                 part_start = (part_idx - 1) * SPLIT_THRESHOLD_BYTES
                 part_len = min(SPLIT_THRESHOLD_BYTES, size - part_start)
-                part_id = f"{p}::part{part_idx}"
+
+                selected_files[part_id] = {
+                    "path": p,
+                    "name": filename,
+                    "size": part_len,
+                    "is_part": True,
+                    "part_index": part_idx,
+                    "total_parts": num_parts,
+                    "start_byte": part_start,
+                    "length_bytes": part_len,
+                }
 
                 if transformed_name:
                     part_str = f"{part_idx:03d}"
@@ -3229,22 +3240,29 @@ async def audit_prepare_queue(request: Request):
                     "totalParts": num_parts,
                     "originalBase": name_no_ext,
                     "fullPath": p,
-                    "categoryId": category_id,
+                    "categoryId": str(category_id) if category_id is not None else None,
                     "categoryName": category_name,
                     "topicId": topic_id,
                     "topicName": topic_name,
                     "transformedName": t_name
                 })
         else:
+            file_id = uuid.uuid4().hex
+            selected_files[file_id] = {
+                "path": p,
+                "name": filename,
+                "size": size,
+                "is_part": False,
+            }
             queue_items.append({
-                "id": p,
+                "id": file_id,
                 "name": filename,
                 "size": size,
                 "totalFileSize": size,
                 "isPart": False,
                 "originalBase": name_no_ext,
                 "fullPath": p,
-                "categoryId": category_id,
+                "categoryId": str(category_id) if category_id is not None else None,
                 "categoryName": category_name,
                 "topicId": topic_id,
                 "topicName": topic_name,
